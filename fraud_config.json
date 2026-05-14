@@ -1,0 +1,39 @@
+{
+  "best_model": "XGBoost",
+  "threshold": 0.65,
+  "features": [
+    "log_amount",
+    "log_old_orig",
+    "log_new_orig",
+    "log_old_dest",
+    "log_new_dest",
+    "orig_balance_drop",
+    "dest_balance_gain",
+    "balance_mismatch",
+    "sender_zero_after",
+    "dest_zero_before",
+    "amount_to_bal_ratio",
+    "type_encoded",
+    "hour_of_day",
+    "is_high_amount",
+    "amount_exceeds_balance",
+    "excess_ratio",
+    "rapid_tx_count"
+  ],
+  "n_features": 17,
+  "fraud_f1": 0.9963,
+  "roc_auc": 1.0,
+  "fraud_logic": {
+    "amount_exceeds_balance": "ALWAYS BLOCK immediately in money_transfer.py before ML \u2014 impossible transaction, no face needed",
+    "face_verify_triggers": [
+      "velocity_burst (rapid_tx_count>=3)",
+      "amount_spike (large unusual jump within balance)",
+      "near_drain (95-100% of balance, unusual)"
+    ],
+    "block_no_face": [
+      "amount > balance",
+      "user abroad",
+      "account inactive"
+    ]
+  }
+}

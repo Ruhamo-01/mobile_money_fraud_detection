@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MoMo Shield — Secure Login</title>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:      #f8fafc;
+      --surface: #ffffff;
+      --card:    #ffffff;
+      --border:  #94a3b8;
+      --accent:  #059669;
+      --accent2: #0284c7;
+      --danger:  #dc2626;
+      --warn:    #d97706;
+      --purple:  #7c3aed;
+      --text:    #0f172a;
+      --muted:   #475569;
+      --radius:  14px;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Sora', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 20px;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background-image:
+        linear-gradient(rgba(5,150,105,.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(5,150,105,.04) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+    }
+
+    .wrap {
+      width: 100%; max-width: 440px;
+      position: relative; z-index: 1;
+    }
+
+    /* ── LOGO ── */
+    .brand {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+    .brand-icon {
+      width: 56px; height: 56px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 16px;
+      display: inline-flex; align-items: center; justify-content: center;
+      margin-bottom: 12px;
+      box-shadow: 0 0 30px rgba(0,200,150,.3);
+    }
+    .brand-icon svg { width: 30px; height: 30px; fill: #fff; }
+    .brand h1 {
+      font-size: 1.5rem; font-weight: 700;
+      letter-spacing: -.02em;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .brand p { color: var(--muted); font-size: .85rem; margin-top: 4px; }
+
+    /* ── CARD ── */
+    .card {
+      background: var(--card);
+      border: 2px solid var(--border);
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+      animation: fadeUp .4s ease;
+    }
+
+    /* ── CARD HEADER (Login title centered) ── */
+    .card-title {
+      text-align: center;
+      padding: 28px 32px 0;
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -.01em;
+    }
+    .card-subtitle {
+      text-align: center;
+      color: var(--muted);
+      font-size: .8rem;
+      padding: 4px 32px 20px;
+    }
+    .card-divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 0;
+    }
+
+    /* ── PANELS ── */
+    .panel { padding: 28px 32px; }
+
+    /* ── INPUTS ── */
+    .field { margin-bottom: 18px; }
+    label {
+      display: block; font-size: .78rem; font-weight: 600;
+      color: var(--muted); margin-bottom: 6px;
+      letter-spacing: .06em; text-transform: uppercase;
+    }
+    input, select {
+      width: 100%; padding: 12px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: 'Sora', sans-serif; font-size: .9rem;
+      transition: border .2s, box-shadow .2s;
+      outline: none;
+    }
+    input:focus, select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(0,200,150,.12);
+    }
+    select option { background: var(--surface); }
+
+    .input-group { display: flex; }
+    .input-group .prefix {
+      padding: 12px 12px; background: var(--surface);
+      border: 1px solid var(--border); border-right: none;
+      border-radius: var(--radius) 0 0 var(--radius);
+      color: var(--accent); font-size: .85rem;
+      font-family: 'JetBrains Mono', monospace; font-weight: 600;
+      white-space: nowrap;
+    }
+    .input-group input {
+      border-radius: 0 var(--radius) var(--radius) 0;
+    }
+
+    /* ── BUTTONS ── */
+    .btn {
+      width: 100%; padding: 13px;
+      border: none; border-radius: var(--radius);
+      font-family: 'Sora', sans-serif; font-weight: 700;
+      font-size: .9rem; letter-spacing: .04em;
+      cursor: pointer; transition: all .2s;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff;
+    }
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 24px rgba(0,200,150,.35);
+    }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+    .btn-ghost {
+      background: transparent; color: var(--accent);
+      border: 1px solid var(--accent);
+    }
+
+    .btn-ghost:hover { background: rgba(0,200,150,.08); }
+
+    /* ── LINK BUTTONS (no underline) ── */
+    .link-btn {
+      background: none; border: none; color: var(--accent2);
+      font-size: .85rem; cursor: pointer;
+      font-family: 'Sora', sans-serif;
+      text-decoration: none;
+    }
+    .link-btn:hover { color: var(--accent); }
+
+    /* ── BOTTOM ROW (forgot / register) ── */
+    .bottom-links {
+      margin-top: 16px;
+      text-align: center;
+      font-size: .85rem;
+      color: var(--muted);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .bottom-links span { color: var(--muted); }
+
+    /* ── ALERTS ── */
+    .alert {
+      padding: 12px 16px; border-radius: var(--radius);
+      font-size: .85rem; margin-bottom: 16px;
+      display: none;
+    }
+    .alert.show { display: block; }
+    .alert-success { background: rgba(0,200,150,.1); color: var(--accent); border: 1px solid rgba(0,200,150,.2); }
+    .alert-danger  { background: rgba(244,63,94,.1);  color: var(--danger); border: 1px solid rgba(244,63,94,.2); }
+    .alert-warn    { background: rgba(245,158,11,.1); color: var(--warn);   border: 1px solid rgba(245,158,11,.2); }
+    .alert-info    { background: rgba(14,165,233,.1); color: var(--accent2);border: 1px solid rgba(14,165,233,.2); }
+
+    /* ── STEP INDICATOR ── */
+    .steps {
+      display: flex; justify-content: center; gap: 6px;
+      margin-bottom: 24px;
+    }
+    .step-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--border); transition: all .3s;
+    }
+    .step-dot.active { background: var(--accent); transform: scale(1.3); }
+    .step-dot.done   { background: var(--accent2); }
+
+    /* ── FACE CAPTURE ── */
+    .face-section {
+      background: var(--surface);
+      border: 1px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 16px; margin-bottom: 18px;
+      text-align: center;
+    }
+    .face-section .face-label {
+      font-size: .82rem; color: var(--muted);
+      display: block; margin-bottom: 12px;
+    }
+    .face-section .face-label span { color: var(--accent); font-weight: 600; }
+
+    #faceVideo {
+      width: 100%; max-width: 260px;
+      border-radius: 12px; border: 2px solid var(--border);
+      display: none; margin: 0 auto 12px;
+    }
+    #faceCanvas { display: none; }
+    #facePlaceholder {
+      width: 100%; max-width: 260px;
+      height: 160px;
+      border-radius: 12px; border: 2px dashed var(--border);
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 12px;
+      color: var(--muted); flex-direction: column; gap: 8px;
+    }
+    #facePlaceholder svg { width: 36px; height: 36px; opacity: .4; }
+    #facePreview {
+      width: 100%; max-width: 260px;
+      border-radius: 12px; border: 2px solid var(--accent);
+      display: none; margin: 0 auto 12px;
+    }
+    .face-btns { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+
+    /* Face buttons styled like main buttons */
+    .face-btn {
+      padding: 10px 18px; border-radius: var(--radius); border: none;
+      font-family: 'Sora', sans-serif; font-size: .82rem; font-weight: 700;
+      cursor: pointer; transition: all .2s;
+      display: inline-flex; align-items: center; gap: 6px;
+      letter-spacing: .03em;
+    }
+    .face-btn-primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff;
+    }
+    .face-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,200,150,.3); }
+    .face-btn-ghost {
+      background: transparent; color: var(--accent);
+      border: 1px solid var(--accent);
+    }
+    .face-btn-ghost:hover { background: rgba(0,200,150,.08); }
+    .face-btn-danger {
+      background: transparent; color: var(--danger);
+      border: 1px solid var(--danger);
+    }
+    .face-btn-danger:hover { background: rgba(220,38,38,.06); }
+
+    #btnStartCam  { }
+    #btnCapture   { display: none; }
+    #btnRetake    { display: none; }
+
+    .face-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: rgba(0,200,150,.12); color: var(--accent);
+      border-radius: 20px; padding: 4px 12px;
+      font-size: .78rem; font-weight: 600; margin-top: 6px;
+    }
+
+    /* ── QUALITY WARNING ── */
+    .quality-warn {
+      display: none;
+      background: rgba(245,158,11,.1); color: var(--warn);
+      border: 1px solid rgba(245,158,11,.3);
+      border-radius: var(--radius); padding: 10px 14px;
+      font-size: .8rem; margin-top: 10px; text-align: left;
+    }
+    .quality-warn.show { display: block; }
+
+    /* scrollable register panel */
+    #panel-register { max-height: 80vh; overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none; }
+    #panel-register::-webkit-scrollbar { display: none; }
+
+    /* spinner */
+    .spinner {
+      display: inline-block; width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,.3);
+      border-top-color: #fff; border-radius: 50%;
+      animation: spin .7s linear infinite; margin-right: 8px;
+      vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── FORGOT PASSWORD INLINE ── */
+    #forgotBox { display: none; margin-top: 16px; }
+    #forgotBox .card { animation: fadeUp .3s ease; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- Brand -->
+  <div class="brand">
+    <div class="brand-icon">
+      <!-- Shield SVG -->
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 4l5 2.18V11c0 3.5-2.33 6.79-5 7.93-2.67-1.14-5-4.43-5-7.93V7.18L12 5z"/>
+      </svg>
+    </div>
+    <h1>MoMo Shield</h1>
+    <p>AI-Powered Mobile Money Fraud Detection</p>
+  </div>
+
+  <!-- ══ LOGIN CARD ══ -->
+  <div class="card" id="loginCard">
+    <div class="card-title">Sign In</div>
+    <div class="card-subtitle">Sign in to your MoMo Shield account</div>
+    <hr class="card-divider">
+
+    <div class="panel">
+      <div id="loginAlert" class="alert"></div>
+
+      <div class="field">
+        <label>Email Address</label>
+        <input type="email" id="loginEmail" placeholder="you@example.com" autocomplete="email">
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password">
+      </div>
+
+      <button class="btn btn-primary" id="btnLogin" onclick="doLogin()">Login</button>
+
+      <div class="bottom-links">
+        <div>
+          <button class="link-btn" onclick="showForgot()">Forgot password?</button>
+        </div>
+        <div>
+          <span>Don't have an account? </span>
+          <button class="link-btn" onclick="showRegister()" style="color:var(--accent);font-weight:600">Register</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ REGISTER CARD ══ -->
+  <div class="card" id="registerCard" style="display:none;">
+    <div class="card-title">Create Account</div>
+    <div class="card-subtitle">Join MoMo Shield for secure transactions</div>
+    <hr class="card-divider">
+
+    <div class="panel" id="panel-register">
+      <div class="steps" id="stepDots">
+        <div class="step-dot active" id="dot0"></div>
+        <div class="step-dot"       id="dot1"></div>
+        <div class="step-dot"       id="dot2"></div>
+      </div>
+
+      <div id="regAlert" class="alert"></div>
+
+      <!-- Step 0: Basic Info -->
+      <div id="regStep0">
+        <div class="field">
+          <label>Full Name</label>
+          <input type="text" id="fullName" placeholder="Enter your full name">
+        </div>
+        <div class="field">
+          <label>Email Address</label>
+          <input type="email" id="regEmail" placeholder="you@example.com">
+        </div>
+        <div class="field">
+          <label>Phone Number</label>
+          <div class="input-group">
+            <span class="prefix">+250</span>
+            <input type="text" id="regPhone" placeholder="78XXXXXXX" maxlength="9">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="regNext(0)">Continue →</button>
+        <div style="text-align:center;margin-top:14px;font-size:.85rem;color:var(--muted)">
+          Already have an account? <button class="link-btn" onclick="showLogin()" style="color:var(--accent);font-weight:600">Login</button>
+        </div>
+      </div>
+
+      <!-- Step 1: ID + Password -->
+      <div id="regStep1" style="display:none">
+        <div class="field">
+          <label>National ID (16 digits)</label>
+          <input type="text" id="nationalId" placeholder="1YYYYMMDD800XXXXX" maxlength="16"
+            oninput="onNidInput(this)">
+          <div style="font-size:.72rem;color:var(--muted);margin-top:5px">
+            Format: 1 + 4-digit birth year + 800 (male) or 700 (female) + remaining digits = 16 total
+          </div>
+        </div>
+        <div class="field">
+          <label>Gender (auto-detected from ID)</label>
+          <select id="gender">
+            <option value="">Select Gender</option>
+            <option value="Male">Male</option>
+            <option value="Female">Female</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input type="password" id="regPassword" placeholder="Min 8 chars, letter + number + symbol">
+        </div>
+        <div class="field">
+          <label>Confirm Password</label>
+          <input type="password" id="confirmPassword" placeholder="Re-enter password">
+        </div>
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-ghost" style="flex:1" onclick="regBack(1)">← Back</button>
+          <button class="btn btn-primary" style="flex:1" onclick="regNext(1)">Continue →</button>
+        </div>
+      </div>
+
+      <!-- Step 2: Face Capture -->
+      <div id="regStep2" style="display:none">
+        <div class="face-section">
+          <span class="face-label">
+            <svg style="display:inline;vertical-align:middle;width:16px;height:16px;fill:var(--accent);margin-right:4px" viewBox="0 0 24 24"><path d="M9 11.75a1.25 1.25 0 100 2.5 1.25 1.25 0 000-2.5zm6 0a1.25 1.25 0 100 2.5 1.25 1.25 0 000-2.5zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8 0-.29.02-.58.05-.86 2.36-1.05 4.23-2.98 5.21-5.37A9.974 9.974 0 0020 13c0 3.87-2.69 7.12-6.34 7.81L12 20z"/></svg>
+            Register your face for <span>biometric verification</span>.<br>
+            Used to verify identity during suspicious transfers.
+          </span>
+
+          <div id="facePlaceholder">
+            <!-- Person SVG icon -->
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/>
+            </svg>
+            <span style="font-size:.78rem">Camera preview</span>
+          </div>
+
+          <video id="faceVideo" autoplay muted playsinline></video>
+          <canvas id="faceCanvas" width="320" height="240"></canvas>
+          <img id="facePreview" alt="Face capture">
+
+          <div id="faceBadge" style="display:none" class="face-badge">
+            <!-- Check SVG -->
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+            Face captured — ready to register
+          </div>
+
+          <div class="quality-warn" id="qualityWarn">
+            <svg style="display:inline;vertical-align:middle;width:14px;height:14px;fill:var(--warn);margin-right:4px" viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+            📷 Photo quality is too low. For best results:<br>
+            • Move near a window or lamp for better lighting<br>
+            • Make sure your face fills the frame<br>
+            • Avoid sitting with a bright light behind you<br>
+            Then tap <strong>Capture</strong> again.          </div>
+
+          <div class="face-btns" style="margin-top:12px">
+            <button id="btnStartCam" class="face-btn face-btn-primary" onclick="startCamera()">
+              <!-- Camera SVG -->
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 15.2a3.2 3.2 0 100-6.4 3.2 3.2 0 000 6.4zM9 2L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15a5 5 0 110-10 5 5 0 010 10z"/></svg>
+              Open Camera
+            </button>
+            <button id="btnCapture" class="face-btn face-btn-primary" onclick="capturePhoto()" style="display:none">
+              <!-- Check SVG -->
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+              Capture
+            </button>
+            <button id="btnRetake" class="face-btn face-btn-ghost" onclick="retakePhoto()" style="display:none">
+              <!-- Refresh SVG -->
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+              Retake Photo
+            </button>
+          </div>
+        </div>
+
+        <div style="font-size:.78rem;color:var(--accent);text-align:center;margin-bottom:16px;font-weight:600">
+          📷 Face registration is required for account security
+        </div>
+
+        <button class="btn btn-primary" id="btnSubmitReg" onclick="submitRegistration()" disabled style="opacity:0.5">
+          <!-- Person add SVG -->
+          <svg style="display:inline;vertical-align:middle;width:16px;height:16px;fill:#fff;margin-right:6px" viewBox="0 0 24 24"><path d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+          Create Account
+        </button>
+        <button class="face-btn face-btn-ghost" onclick="regBack(2)" style="margin-top:10px;width:100%;justify-content:center">
+          <!-- Back arrow SVG -->
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+          Back
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ FORGOT PASSWORD INLINE ══ -->
+  <div id="forgotBox">
+    <div class="card">
+      <div class="card-title">Reset Password</div>
+      <div class="card-subtitle">Enter your email to receive a reset link</div>
+      <hr class="card-divider">
+      <div class="panel">
+        <div id="forgotAlert" class="alert"></div>
+        <div class="field">
+          <label>Email Address</label>
+          <input type="email" id="forgotEmail" placeholder="you@example.com">
+        </div>
+        <button class="btn btn-primary" onclick="doForgot()">Send Reset Link</button>
+        <button class="btn btn-ghost" onclick="hideForgot()" style="margin-top:10px">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /wrap -->
+
+<script>
+const API = '';
+
+/* ── Utility ─────────────────────────────────────────────────────────── */
+function showAlert(id, msg, type='danger') {
+  const el = document.getElementById(id);
+  el.className = `alert alert-${type} show`;
+  el.textContent = msg;
+  setTimeout(() => el.classList.remove('show'), 6000);
+}
+function hideAlert(id) {
+  document.getElementById(id).classList.remove('show');
+}
+function setLoading(btnId, on, text='') {
+  const b = document.getElementById(btnId);
+  if (on) b.innerHTML = `<span class="spinner"></span>${text}`;
+  else     b.textContent = text;
+  b.disabled = on;
+}
+
+/* ── View Switchers ──────────────────────────────────────────────────── */
+function showRegister() {
+  document.getElementById('loginCard').style.display = 'none';
+  document.getElementById('forgotBox').style.display = 'none';
+  document.getElementById('registerCard').style.display = 'block';
+  setStep(0);
+}
+function showLogin() {
+  document.getElementById('registerCard').style.display = 'none';
+  document.getElementById('forgotBox').style.display = 'none';
+  document.getElementById('loginCard').style.display = 'block';
+}
+
+/* ── LOGIN ───────────────────────────────────────────────────────────── */
+async function doLogin() {
+  const email    = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  hideAlert('loginAlert');
+  if (!email || !password) { showAlert('loginAlert','Please fill in all fields.'); return; }
+
+  setLoading('btnLogin', true, 'Logging in…');
+  try {
+    const r = await fetch(`${API}/api/login`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({email, password})
+    });
+    const d = await r.json();
+    if (d.success) {
+      localStorage.setItem('session_token', d.session_token);
+      localStorage.setItem('user', JSON.stringify(d.user));
+      localStorage.setItem('flash_message', `Logged in successfully!`);
+      localStorage.setItem('flash_type', 'success');
+      const dashboardUrl = d.dashboard_url || '/user_dashboard';
+      window.location.href = dashboardUrl;
+    } else {
+      showAlert('loginAlert', d.error || 'Login failed.');
+      setLoading('btnLogin', false, 'Login');
+    }
+  } catch(e) {
+    showAlert('loginAlert','Server error. Please try again.');
+    setLoading('btnLogin', false, 'Login');
+  }
+}
+document.getElementById('loginPassword').addEventListener('keydown', e => {
+  if (e.key==='Enter') doLogin();
+});
+
+/* ── REGISTER — multi-step ───────────────────────────────────────────── */
+let regStep = 0;
+function setStep(n) {
+  [0,1,2].forEach(i => {
+    document.getElementById(`regStep${i}`).style.display = i===n ? 'block' : 'none';
+    const dot = document.getElementById(`dot${i}`);
+    dot.classList.remove('active','done');
+    if (i<n) dot.classList.add('done');
+    if (i===n) dot.classList.add('active');
+  });
+  regStep = n;
+}
+
+function regNext(from) {
+  hideAlert('regAlert');
+  if (from===0) {
+    const name  = document.getElementById('fullName').value.trim();
+    const email = document.getElementById('regEmail').value.trim();
+    const phone = document.getElementById('regPhone').value.trim();
+    if (!name)  { showAlert('regAlert','Full name is required.'); return; }
+    if (!email || !email.includes('@')) { showAlert('regAlert','Invalid email.'); return; }
+    if (!phone.match(/^(78|79|72|73)\d{7}$/)) {
+      showAlert('regAlert','Phone must be 9 digits starting with 78, 79, 72, or 73.'); return; }
+    setStep(1);
+  } else if (from===1) {
+    const nid  = document.getElementById('nationalId').value.trim();
+    const pass = document.getElementById('regPassword').value;
+    const conf = document.getElementById('confirmPassword').value;
+
+    // Validate NID: must be 16 digits, start with 1, digits 6-8 must be 800 or 700
+    const nidErr = validateNID(nid);
+    if (nidErr) { showAlert('regAlert', nidErr); return; }
+
+    if (pass.length<8 || !/\d/.test(pass) || !/[a-zA-Z]/.test(pass) || !/[!@#$%^&*(),.?":{}|<>_\-]/.test(pass)) {
+      showAlert('regAlert','Password: min 8 chars, include letter, number, special character.'); return; }
+    if (pass!==conf) { showAlert('regAlert','Passwords do not match.'); return; }
+    setStep(2);
+  }
+}
+
+function regBack(from) {
+  setStep(from-1);
+  if (from===2) stopCamera();
+}
+
+/* ── NID VALIDATION ──────────────────────────────────────────────────── */
+function validateNID(nid) {
+  if (!/^\d{16}$/.test(nid)) return 'National ID must be exactly 16 digits.';
+  if (nid[0] !== '1') return 'National ID must start with 1 (Rwanda country code).';
+  // Digits index 1-4: birth year (e.g. 1990–2024)
+  const year = parseInt(nid.substring(1, 5));
+  const curYear = new Date().getFullYear();
+  if (year < 1900 || year > curYear) return `Birth year in ID (positions 2–5) must be between 1900 and ${curYear}.`;
+  // Digits index 5-7: gender code must be 800 or 700
+  const genderCode = nid.substring(5, 8);
+  if (genderCode !== '800' && genderCode !== '700') {
+    return 'Positions 6–8 of National ID must be 800 (Male) or 700 (Female).';
+  }
+  return null; // valid
+}
+
+/* ── NID INPUT ────────────────────────────────────────────────────────── */
+function onNidInput(el) {
+  const nid = el.value;
+  if (nid.length === 16) {
+    const genderCode = nid.substring(5, 8);
+    if (genderCode === '800') document.getElementById('gender').value = 'Male';
+    else if (genderCode === '700') document.getElementById('gender').value = 'Female';
+  }
+}
+
+/* ── FACE CAMERA ─────────────────────────────────────────────────────── */
+let stream = null;
+let faceBase64 = null;
+
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
+    });
+    const vid = document.getElementById('faceVideo');
+    vid.srcObject = stream;
+    vid.style.display = 'block';
+    // Mirror for natural selfie view
+    vid.style.transform = 'scaleX(-1)';
+    document.getElementById('facePlaceholder').style.display = 'none';
+    document.getElementById('facePreview').style.display     = 'none';
+    document.getElementById('btnStartCam').style.display     = 'none';
+    document.getElementById('btnCapture').style.display      = 'inline-flex';
+    document.getElementById('btnRetake').style.display       = 'none';
+    document.getElementById('faceBadge').style.display       = 'none';
+    document.getElementById('qualityWarn').classList.remove('show');
+    faceBase64 = null;
+  } catch(e) {
+    showAlert('regAlert','Camera access denied. Please allow camera access and try again — face registration is required.');
+  }
+}
+
+/* Simple brightness quality check */
+function checkImageQuality(canvas) {
+  const ctx = canvas.getContext('2d');
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  let total = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    total += 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+  }
+  const avg = total / (data.length / 4);
+  return avg; // 0–255; below 40 = very dark, above 240 = very bright (overexposed)
+}
+
+function capturePhoto() {
+  const vid    = document.getElementById('faceVideo');
+  const canvas = document.getElementById('faceCanvas');
+  // Use native video resolution for best quality
+  canvas.width  = vid.videoWidth  || 1280;
+  canvas.height = vid.videoHeight || 720;
+  const ctx = canvas.getContext('2d');
+  // Mirror to match display
+  ctx.translate(canvas.width, 0); ctx.scale(-1, 1);
+  ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  // Enhanced quality check: brightness
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  let total = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    total += 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+  }
+  const avg = total / (data.length / 4);
+
+  const qualityWarn = document.getElementById('qualityWarn');
+  if (avg < 30) {
+    qualityWarn.textContent = '⚠️ Image too dark — move to a brighter area and try again.';
+    qualityWarn.classList.add('show');
+    return;
+  }
+  if (avg > 240) {
+    qualityWarn.textContent = '⚠️ Image too bright — reduce glare or move away from direct light.';
+    qualityWarn.classList.add('show');
+    return;
+  }
+
+  qualityWarn.classList.remove('show');
+  
+  // Save at high quality (95%)
+  faceBase64 = canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
+
+  // Validate face detection on client side before showing "captured"
+  const preview = document.getElementById('facePreview');
+  preview.src   = 'data:image/jpeg;base64,' + faceBase64;
+  preview.style.display = 'block';
+  vid.style.display     = 'none';
+  stopCamera();
+
+  // Show loading state while validating face
+  document.getElementById('btnCapture').style.display = 'none';
+  document.getElementById('btnRetake').style.display = 'none';
+  document.getElementById('faceBadge').style.display = 'none';
+  document.getElementById('qualityWarn').innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px">
+      <div style="width:16px;height:16px;border:2px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="margin-right:4px;vertical-align:middle"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+      Analyzing face image...
+    </div>
+  `;
+  document.getElementById('qualityWarn').classList.add('show');
+
+  // Send to server for face validation
+  validateFaceCapture(faceBase64);
+}
+
+async function validateFaceCapture(base64Image) {
+  try {
+    const response = await fetch(`${API}/api/validate-face`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ face_base64: base64Image })
+    });
+    
+    const result = await response.json();
+    
+    if ((result.success || result.face_detected) && result.face_count > 0) {
+      // Face properly detected - enable registration
+      document.getElementById('qualityWarn').classList.remove('show');
+      document.getElementById('btnRetake').style.display = 'inline-flex';
+      document.getElementById('faceBadge').style.display = 'inline-flex';
+      document.getElementById('btnSubmitReg').disabled = false;
+      document.getElementById('btnSubmitReg').style.opacity = '1';
+      
+      // Update badge to show successful face detection (remove AI icons, use only SVG)
+      document.getElementById('faceBadge').innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+        Face detected — ready to register
+      `;
+    } else {
+      // No face detected - keep button disabled
+      document.getElementById('qualityWarn').textContent = result.error || '❌ No face detected. Please ensure your face is clearly visible and try again.';
+      document.getElementById('qualityWarn').classList.add('show');
+      document.getElementById('btnRetake').style.display = 'inline-flex';
+      document.getElementById('faceBadge').style.display = 'none';
+      document.getElementById('btnSubmitReg').disabled = true;
+      document.getElementById('btnSubmitReg').style.opacity = '0.5';
+    }
+  } catch (error) {
+    console.error('Face validation error:', error);
+    document.getElementById('qualityWarn').textContent = '❌ Face validation failed. Please try again.';
+    document.getElementById('qualityWarn').classList.add('show');
+    document.getElementById('btnRetake').style.display = 'inline-flex';
+    document.getElementById('faceBadge').style.display = 'none';
+    document.getElementById('btnSubmitReg').disabled = true;
+    document.getElementById('btnSubmitReg').style.opacity = '0.5';
+  }
+}
+
+function retakePhoto() {
+  document.getElementById('facePreview').style.display = 'none';
+  document.getElementById('faceBadge').style.display   = 'none';
+  document.getElementById('btnRetake').style.display   = 'none';
+  document.getElementById('qualityWarn').classList.remove('show');
+  document.getElementById('btnStartCam').style.display = 'inline-flex';
+  
+  // Disable submit button when retaking photo
+  document.getElementById('btnSubmitReg').disabled = true;
+  document.getElementById('btnSubmitReg').style.opacity = '0.5';
+  
+  faceBase64 = null;
+}
+
+function stopCamera() {
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+}
+
+/* ── SUBMIT REGISTRATION ─────────────────────────────────────────────── */
+async function submitRegistration() {
+  hideAlert('regAlert');
+  const btn = document.getElementById('btnSubmitReg');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Creating account…';
+
+  const phone = '+250' + document.getElementById('regPhone').value.trim();
+  const body  = {
+    fullName  : document.getElementById('fullName').value.trim(),
+    email     : document.getElementById('regEmail').value.trim(),
+    phone,
+    nationalId: document.getElementById('nationalId').value.trim(),
+    password  : document.getElementById('regPassword').value,
+  };
+  if (faceBase64) body.face_base64 = faceBase64;
+
+  stopCamera();
+
+  try {
+    const r = await fetch(`${API}/api/register`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (d.success) {
+      localStorage.setItem('flash_message',
+        d.face_registered
+          ? '✅ Account created with face registration! Please login.'
+          : '✅ Account created! You can add face recognition in Settings later.');
+      localStorage.setItem('flash_type','success');
+      showLogin();
+    } else {
+      showAlert('regAlert', d.error || 'Registration failed.');
+      btn.disabled = false;
+      btn.innerHTML = `<svg style="display:inline;vertical-align:middle;width:16px;height:16px;fill:#fff;margin-right:6px" viewBox="0 0 24 24"><path d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>Create Account`;
+    }
+  } catch(e) {
+    showAlert('regAlert','Server error. Please try again.');
+    btn.disabled = false;
+    btn.textContent = 'Create Account';
+  }
+}
+
+/* ── FORGOT PASSWORD ─────────────────────────────────────────────────── */
+function showForgot() {
+  document.getElementById('loginCard').style.display    = 'none';
+  document.getElementById('registerCard').style.display = 'none';
+  document.getElementById('forgotBox').style.display    = 'block';
+  document.getElementById('forgotBox').scrollIntoView({behavior:'smooth'});
+}
+function hideForgot() {
+  document.getElementById('forgotBox').style.display = 'none';
+  document.getElementById('loginCard').style.display = 'block';
+}
+
+async function doForgot() {
+  const email = document.getElementById('forgotEmail').value.trim();
+  hideAlert('forgotAlert');
+  if (!email || !email.includes('@')) {
+    showAlert('forgotAlert','Enter a valid email address.'); return; }
+  try {
+    const r = await fetch(`${API}/api/reset-password`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({email})
+    });
+    const d = await r.json();
+    if (d.success) {
+      showAlert('forgotAlert','Reset link sent! Check your email.','success');
+      setTimeout(hideForgot, 3000);
+    } else {
+      showAlert('forgotAlert', d.error || 'Reset failed.');
+    }
+  } catch(e) {
+    showAlert('forgotAlert','Server error. Please try again.');
+  }
+}
+
+/* ── ON LOAD ─────────────────────────────────────────────────────────── */
+window.addEventListener('load', () => {
+  const token = localStorage.getItem('session_token');
+
+  if (token) {
+    // Validate session first — if still valid, redirect silently (don't show flash)
+    fetch(`${API}/api/validate-session`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({session_token:token})
+    }).then(r=>r.json()).then(d=>{
+      if (d.success) {
+        // Clear any stale flash before redirect — it belongs to the previous session
+        localStorage.removeItem('flash_message');
+        localStorage.removeItem('flash_type');
+        window.location.href = d.dashboard_url || '/user_dashboard';
+      } else {
+        // Session expired — now it's safe to show the flash (e.g. "logged out" message)
+        localStorage.removeItem('session_token');
+        localStorage.removeItem('user');
+        const msg  = localStorage.getItem('flash_message');
+        const type = localStorage.getItem('flash_type') || 'info';
+        if (msg) {
+          showAlert('loginAlert', msg, type);
+          localStorage.removeItem('flash_message');
+          localStorage.removeItem('flash_type');
+        }
+      }
+    }).catch(()=>{
+      // Network error — show flash if any
+      const msg  = localStorage.getItem('flash_message');
+      const type = localStorage.getItem('flash_type') || 'info';
+      if (msg) {
+        showAlert('loginAlert', msg, type);
+        localStorage.removeItem('flash_message');
+        localStorage.removeItem('flash_type');
+      }
+    });
+  } else {
+    // No token — show flash message if any (e.g. "You have been logged out")
+    const msg  = localStorage.getItem('flash_message');
+    const type = localStorage.getItem('flash_type') || 'info';
+    if (msg) {
+      showAlert('loginAlert', msg, type);
+      localStorage.removeItem('flash_message');
+      localStorage.removeItem('flash_type');
+    }
+  }
+});
+</script>
+</body>
+</html>

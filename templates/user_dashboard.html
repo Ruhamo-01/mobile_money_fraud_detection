@@ -1,0 +1,1532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MoMo Shield — User Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:      #ffffff;
+      --surface: #f8fafc;
+      --card:    #ffffff;
+      --border:  #cbd5e1;
+      --accent:  #059669;
+      --accent2: #0284c7;
+      --danger:  #dc2626;
+      --warn:    #d97706;
+      --purple:  #7c3aed;
+      --text:    #1e293b;
+      --muted:   #64748b;
+      --radius:  14px;
+      --sidebar:  230px;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+ 
+    body {
+      font-family: 'Sora', sans-serif;
+      background: var(--bg); color: var(--text);
+      display: flex; overflow: hidden;
+    }
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background-image:
+        linear-gradient(rgba(5,150,105,.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(5,150,105,.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none; z-index: 0;
+    }
+ 
+    /* ── SIDEBAR ── */
+    aside {
+      width: var(--sidebar); flex-shrink: 0;
+      background: var(--card);
+      border: 2px solid var(--border);
+      border-radius: 20px;
+      margin: 16px;
+      height: calc(100vh - 32px);
+      display: flex; flex-direction: column;
+      position: relative; z-index: 10;
+      overflow: hidden;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+    }
+    .sidebar-brand {
+      padding: 22px 20px 16px;
+      border-bottom: 1px solid var(--border);
+      text-align: center;
+    }
+    .brand-logo {
+      display: flex; flex-direction: column; align-items: center; gap: 10px;
+      font-weight: 700; font-size: .95rem;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .brand-sub { font-size: .72rem; color: var(--muted); margin-top: 4px; }
+    .user-initials {
+      width: 50px; height: 50px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: white;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.2rem; font-weight: 700;
+      margin: 0 auto 10px;
+    }
+ 
+    .sidebar-user {
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      text-align: center;
+      display: none;
+    }
+    .user-name { font-size: .85rem; font-weight: 600; }
+    .user-phone { font-size: .75rem; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+    .user-balance {
+      margin-top: 8px;
+      background: rgba(0,200,150,.08);
+      border: 1px solid rgba(0,200,150,.2);
+      border-radius: 8px; padding: 8px 12px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .9rem; font-weight: 600; color: var(--accent);
+    }
+ 
+    nav.sidebar-nav { padding: 14px 12px; flex: 1; min-height: 0; text-align: left; overflow-y: auto; }
+    .nav-item {
+      display: flex; align-items: center; justify-content: flex-start; gap: 10px;
+      padding: 10px 14px; border-radius: 10px;
+      font-size: .83rem; font-weight: 600; color: var(--muted);
+      cursor: pointer; transition: all .18s;
+      margin-bottom: 2px; border: none; background: none;
+      width: 100%; text-align: left; font-family: 'Sora', sans-serif;
+      position: relative;
+    }
+    .nav-item:hover  { background: var(--surface); color: var(--text); }
+    .nav-item.active { background: rgba(0,200,150,.1); color: var(--accent); }
+    .nav-item svg    { width: 16px; height: 16px; fill: currentColor; flex-shrink: 0; }
+
+    .nav-section-label {
+      font-size: .65rem; text-transform: uppercase; letter-spacing: .1em;
+      color: var(--muted); padding: 14px 14px 6px;
+    }
+
+    .logout-btn {
+      margin: 12px 16px 16px;
+      width: calc(100% - 32px);
+      justify-content: center;
+      flex-shrink: 0;
+    }
+ 
+    /* ── MAIN ── */
+    main {
+      flex: 1; display: flex; flex-direction: column;
+      position: relative; z-index: 5;
+      height: 100vh; overflow-y: auto;
+      padding: 24px;
+    }
+ 
+    .page-hdr {
+      margin-bottom: 24px;
+      text-align: center;
+    }
+    .page-hdr h1 {
+      font-size: 1.8rem; font-weight: 700;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .page-hdr p { color: var(--muted); margin-top: 4px; font-size: .9rem; }
+ 
+    .page { display: none; }
+    .page.active { display: block; }
+ 
+    /* ── CARDS ── */
+    .card {
+      background: var(--card);
+      border: 2px solid var(--border);
+      border-radius: 20px;
+      margin-bottom: 24px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+    }
+    .card-hdr {
+      padding: 20px 24px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 14px;
+    }
+    .card-hdr-icon {
+      width: 40px; height: 40px; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+    }
+    .card-hdr-icon svg { width: 20px; height: 20px; fill: #fff; }
+    .card-hdr-txt h2 { font-size: 1.1rem; font-weight: 600; }
+    .card-hdr-txt p  { font-size: .78rem; color: var(--muted); margin-top: 2px; }
+    .card-body { padding: 24px; }
+ 
+    /* ── BUTTONS ── */
+    .btn {
+      padding: 10px 16px; border-radius: 8px; font-weight: 600;
+      font-size: .85rem; border: none; cursor: pointer;
+      transition: all .18s; font-family: 'Sora', sans-serif;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff;
+    }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,200,150,.3); }
+    .btn-ghost {
+      background: transparent; color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover { background: var(--surface); color: var(--text); }
+    .btn-block { width: 100%; justify-content: center; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+ 
+    /* ── FORMS ── */
+    .field { margin-bottom: 20px; }
+    .lbl {
+      display: block; font-size: .78rem; font-weight: 600;
+      color: var(--text); margin-bottom: 6px;
+    }
+    input, select {
+      width: 100%; padding: 10px 14px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--surface);
+      color: var(--text); font-family: 'JetBrains Mono', monospace;
+      font-size: .9rem;
+    }
+    input:focus, select:focus {
+      outline: none; border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(0,200,150,.1);
+    }
+    .input-grp {
+      display: flex; align-items: center;
+      border: 1px solid var(--border); border-radius: 8px;
+      background: var(--surface);
+    }
+    .input-grp:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0,200,150,.1); }
+    .input-grp input { border: none; background: none; flex: 1; padding: 10px 14px; }
+    .prefix {
+      padding: 10px 14px; color: var(--muted);
+      font-family: 'JetBrains Mono', monospace; font-size: .9rem;
+      border-right: 1px solid var(--border);
+    }
+ 
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+ 
+    /* ── PROFILE ── */
+    .profile-field {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 12px 0; border-bottom: 1px solid rgba(31,45,69,.5); font-size: .85rem;
+    }
+    .profile-field:last-child { border-bottom: none; }
+    .profile-field .key { color: var(--muted); font-size: .78rem; }
+    .profile-field .val { font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: .82rem; }
+ 
+    /* ── RECIPIENT PREVIEW ── */
+    .recipient-preview {
+      padding: 8px 12px; border-radius: 8px; font-size: .82rem;
+      background: rgba(5,150,105,.08); border: 1px solid rgba(5,150,105,.2);
+      color: var(--accent); font-weight: 600; margin-top: 6px;
+      display: none;
+    }
+    .recipient-preview.show { display: block; }
+ 
+    /* ── FEE PREVIEW ── */
+    .fee-preview {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px 16px; margin-bottom: 16px;
+      font-size: .82rem; display: none;
+    }
+    .fee-preview.show { display: block; }
+    .fee-row { display: flex; justify-content: space-between; padding: 3px 0; }
+    .fee-row.total { font-weight: 700; border-top: 1px solid var(--border); margin-top: 6px; padding-top: 6px; }
+ 
+    /* spinner */
+    .spinner {
+      width: 16px; height: 16px; border: 2px solid var(--muted);
+      border-top-color: var(--accent); border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+ 
+    .mono { font-family: 'JetBrains Mono', monospace; }
+ 
+    .msg {
+      padding: 10px 14px; border-radius: 8px; font-size: .85rem;
+      margin-bottom: 16px; display: none;
+    }
+    .msg.show { display: block; }
+    .msg-success { background: rgba(0,200,150,.1); color: var(--accent); border: 1px solid rgba(0,200,150,.2); }
+    .msg-error   { background: rgba(244,63,94,.1); color: var(--danger); border: 1px solid rgba(244,63,94,.2); }
+    .msg-info    { background: rgba(14,165,233,.1); color: var(--accent2); border: 1px solid rgba(14,165,233,.2); }
+    .msg-warn    { background: rgba(217,119,6,.1); color: var(--warn); border: 1px solid rgba(217,119,6,.2); }
+ 
+    .empty-state { text-align: center; color: var(--muted); padding: 40px; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <aside>
+    <div class="sidebar-brand">
+      <div class="user-initials" id="userInitials">UE</div>
+      <div class="brand-logo">MoMo Shield</div>
+      <div class="brand-sub">User Dashboard</div>
+    </div>
+ 
+    <div class="sidebar-user">
+      <div class="user-name"  id="sidebarName">—</div>
+      <div class="user-phone" id="sidebarPhone">—</div>
+      <div class="user-balance" id="sidebarBalance">0 RWF</div>
+    </div>
+ 
+    <nav class="sidebar-nav">
+      <div class="nav-section-label">My Account</div>
+      <button class="nav-item active" onclick="showPage('balance')">
+        <svg viewBox="0 0 24 24"><path d="M21 18v1c0 1.1-.9 2-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h14c1.1 0 2 .9 2 2v1h-9a2 2 0 00-2 2v8a2 2 0 002 2h9zm-9-2h10V8H12v8zm4-2.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
+        Balance
+      </button>
+      <button class="nav-item" onclick="showPage('transfer')">
+        <svg viewBox="0 0 24 24"><path d="M2 12l7 7 13-13-1.4-1.4L9 16.2l-5.6-5.6z"/></svg>
+        Send Money
+      </button>
+      <button class="nav-item" onclick="showPage('history')">
+        <svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 00-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0013 21a9 9 0 000-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+        History
+      </button>
+      <button class="nav-item" onclick="showPage('reset-pin')">
+        <svg viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+        Reset PIN
+      </button>
+      <button class="nav-item" onclick="showPage('update-face')">
+        <svg viewBox="0 0 24 24"><path d="M9 11.75A1.25 1.25 0 1 0 9 14.25 1.25 1.25 0 0 0 9 11.75zm6 0a1.25 1.25 0 1 0 0 2.5 1.25 1.25 0 0 0 0-2.5zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8 0-.29.02-.58.05-.86 2.36-1.05 4.23-2.98 5.21-5.37C11.07 8.33 13.93 10 17.14 10c.79 0 1.55-.1 2.28-.27C19.73 10.11 20 11.03 20 12c0 4.41-3.59 8-8 8z"/></svg>
+        Update Face
+      </button>
+      <button class="nav-item" onclick="showPage('profile')">
+        <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+        Profile
+      </button>
+    </nav>
+
+    <button class="btn btn-ghost logout-btn" onclick="doLogout()">Logout</button>
+  </aside>
+ 
+  <main>
+    <!-- BALANCE PAGE -->
+    <div class="page active" id="page-balance">
+      <div class="page-hdr"><h1>My Balance</h1><p>Account overview and quick actions</p></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+        <div class="card">
+          <div class="card-hdr" style="flex-direction:column;align-items:center;text-align:center;padding:24px 24px 16px">
+            <div class="card-hdr-icon">
+              <svg viewBox="0 0 24 24"><path d="M21 18v1c0 1.1-.9 2-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h14c1.1 0 2 .9 2 2v1h-9a2 2 0 00-2 2v8a2 2 0 002 2h9zm-9-2h10V8H12v8zm4-2.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
+            </div>
+            <div class="card-hdr-txt"><h2>Account Balance</h2></div>
+          </div>
+          <div class="card-body" style="text-align:center;padding:36px">
+            <div style="font-size:2.4rem;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--accent)" id="bigBalance">—</div>
+            <div style="color:var(--muted);font-size:.82rem;margin-top:6px">Rwanda Francs</div>
+            <div style="margin-top:24px">
+              <button class="btn btn-primary" onclick="showPage('transfer')" style="padding:10px 20px;font-size:.82rem">Send Money</button>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-hdr" style="flex-direction:column;align-items:center;text-align:center;padding:24px 24px 16px">
+            <div class="card-hdr-icon" style="background:linear-gradient(135deg,var(--purple),var(--accent2))">
+              <svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 00-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0013 21a9 9 0 000-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+            </div>
+            <div class="card-hdr-txt"><h2>Recent Activity</h2></div>
+          </div>
+          <div class="card-body" style="padding:0">
+            <div id="balanceHistory"><div class="empty-state">No recent transactions</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+ 
+    <!-- TRANSFER PAGE -->
+    <div class="page" id="page-transfer">
+      <div class="page-hdr"><h1>Send Money</h1><p>Secure transfer with real-time fraud protection</p></div>
+      <div style="max-width:480px;margin:0 auto">
+        <div class="card">
+          <div class="card-hdr" style="flex-direction:column;align-items:center;text-align:center;padding:24px 24px 16px">
+            <div class="card-hdr-icon">
+              <svg viewBox="0 0 24 24"><path d="M2 12l7 7 13-13-1.4-1.4L9 16.2l-5.6-5.6z"/></svg>
+            </div>
+            <div class="card-hdr-txt"><h2>New Transfer</h2></div>
+          </div>
+          <div class="card-body">
+            <div id="transferMsg" class="msg"></div>
+            <div class="field">
+              <label class="lbl">Recipient Phone</label>
+              <div class="input-grp">
+                <span class="prefix">+250</span>
+                <input type="text" id="recipientPhone" placeholder="78XXXXXXX" maxlength="10"
+                       oninput="onPhoneInput()" onblur="lookupRecipient()">
+              </div>
+              <div class="recipient-preview" id="recipientPreview"></div>
+            </div>
+            <div class="field">
+              <label class="lbl">Amount (RWF)</label>
+              <input type="number" id="transferAmount" placeholder="5000" min="100"
+                     oninput="onAmountInput()">
+            </div>
+            <div class="fee-preview" id="feePreview">
+              <div class="fee-row"><span>Amount</span><span id="feeAmt">—</span></div>
+              <div class="fee-row"><span>Fee</span><span id="feeFee">—</span></div>
+              <div class="fee-row total"><span>Total deducted</span><span id="feeTotal">—</span></div>
+            </div>
+            <button class="btn btn-primary btn-block" id="btnTransfer" onclick="doTransfer()">
+              <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;flex-shrink:0;vertical-align:middle"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg> Send Money
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+ 
+    <!-- HISTORY PAGE -->
+    <div class="page" id="page-history">
+      <div class="page-hdr"><h1>Transaction History</h1><p>Your recent money transfers</p></div>
+      <div class="card">
+        <div class="card-hdr" style="flex-direction:column;align-items:center;text-align:center;padding:24px 24px 16px">
+          <div class="card-hdr-icon" style="background:linear-gradient(135deg,var(--purple),var(--accent2))">
+            <svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 00-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0013 21a9 9 0 000-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+          </div>
+          <div class="card-hdr-txt"><h2>Recent Transfers</h2></div>
+        </div>
+        <div class="card-body" style="padding:0">
+          <div id="historyList"><div class="empty-state">Loading history...</div></div>
+        </div>
+      </div>
+    </div>
+ 
+    <!-- PROFILE PAGE -->
+    <div class="page" id="page-profile">
+      <div class="page-hdr"><h1>My Profile</h1><p>Account information and settings</p></div>
+      <div style="max-width:600px;margin:0 auto">
+        <div class="card">
+          <div class="card-hdr" style="flex-direction:column;align-items:center;text-align:center;padding:24px 24px 16px">
+            <div class="card-hdr-icon">
+              <svg viewBox="0 0 24 24"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>
+            </div>
+            <div class="card-hdr-txt"><h2>Account Details</h2></div>
+          </div>
+          <div class="card-body">
+            <div class="profile-field"><span class="key">Full Name</span><span class="val" id="detailName">—</span></div>
+            <div class="profile-field"><span class="key">Phone Number</span><span class="val" id="detailPhone">—</span></div>
+            <div class="profile-field"><span class="key">Email</span><span class="val" id="detailEmail">—</span></div>
+            <div class="profile-field"><span class="key">National ID</span><span class="val" id="detailNationalId">—</span></div>
+            <div class="profile-field"><span class="key">Account Status</span><span class="val">Active</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RESET PIN PAGE -->
+    <div class="page" id="page-reset-pin">
+      <div class="page-hdr"><h1>Reset PIN</h1><p>Verify your identity to reset your transaction PIN</p></div>
+      <div style="max-width:480px;margin:0 auto">
+        <div class="card">
+          <div class="card-hdr" style="flex-direction:column;align-items:center;text-align:center;padding:24px 24px 16px">
+            <div class="card-hdr-icon" style="background:linear-gradient(135deg,var(--warn),var(--danger))">
+              <svg viewBox="0 0 24 24"><path fill="#fff" d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+            </div>
+            <div class="card-hdr-txt"><h2>PIN Reset</h2><p>3 steps: identity → new PIN → face scan</p></div>
+          </div>
+          <div class="card-body">
+            <div id="resetPinMsg" class="msg"></div>
+
+            <!-- STEP 1: Phone + National ID -->
+            <div id="rp-step1">
+              <p style="font-size:.82rem;color:var(--muted);margin-bottom:14px;text-align:center"><strong>Step 1 of 3</strong> — Verify your identity</p>
+              <div id="rpIdentityMsg" class="msg"></div>
+              <div class="field">
+                <label class="lbl">Phone Number</label>
+                <input type="tel" id="resetPhone" placeholder="e.g. 0780000000" autocomplete="off" oninput="document.getElementById('rpIdentityMsg').textContent=''">
+              </div>
+              <div class="field">
+                <label class="lbl">National ID (16 digits)</label>
+                <input type="text" id="resetNationalId" placeholder="Enter your 16-digit National ID" maxlength="16" inputmode="numeric" oninput="document.getElementById('rpIdentityMsg').textContent=''">
+              </div>
+              <button class="btn btn-primary btn-block" id="btnRpVerifyId" onclick="rpVerifyIdentity()">
+                <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;flex-shrink:0;vertical-align:middle"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg> Verify Identity
+              </button>
+            </div>
+
+            <!-- STEP 2: New PIN -->
+            <div id="rp-step2" style="display:none">
+              <p style="font-size:.82rem;color:var(--muted);margin-bottom:14px;text-align:center">
+                <strong>Step 2 of 3</strong> — Set your new PIN
+                <span id="rpVerifiedName" style="display:block;color:var(--accent);font-weight:600;margin-top:4px"></span>
+              </p>
+              <div class="field">
+                <label class="lbl">New PIN (4–6 digits)</label>
+                <input type="password" id="resetNewPin" placeholder="••••" maxlength="6" inputmode="numeric" oninput="rpCheckPinMatch()">
+              </div>
+              <div class="field">
+                <label class="lbl">Confirm New PIN</label>
+                <input type="password" id="resetConfirmPin" placeholder="••••" maxlength="6" inputmode="numeric" oninput="rpCheckPinMatch()">
+              </div>
+              <div id="rpPinMatchMsg" style="font-size:.8rem;min-height:18px;margin-bottom:10px;text-align:center"></div>
+            </div>
+
+            <!-- STEP 3: Face Scan -->
+            <div id="rp-step3" style="display:none">
+              <p style="font-size:.82rem;color:var(--muted);margin-bottom:14px;text-align:center"><strong>Step 3 of 3</strong> — Scan your face to confirm</p>
+              <div style="border-radius:12px;overflow:hidden;background:#000;margin-bottom:10px;min-height:140px;display:flex;align-items:center;justify-content:center;position:relative">
+                <video id="resetFaceVideo" autoplay playsinline style="display:none;width:100%;max-height:200px;transform:scaleX(-1)"></video>
+                <canvas id="resetFaceCanvas" style="display:none"></canvas>
+                <img id="resetFacePreview" style="display:none;width:100%;max-height:200px;object-fit:cover">
+                <div id="resetFacePrompt" style="color:#555;font-size:.85rem;padding:30px;text-align:center">
+                  <div style="display:flex;flex-direction:column;align-items:center">
+                    <svg viewBox="0 0 24 24" style="width:40px;height:40px;fill:var(--muted);margin-bottom:8px"><path d="M12 15.2A3.2 3.2 0 1 0 12 8.8a3.2 3.2 0 0 0 0 6.4zm0 1.8a5 5 0 1 1 0-10 5 5 0 0 1 0 10zM20 4h-3.17L15 2H9L7.17 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/></svg>
+                    <span>Click below to scan your face</span>
+                  </div>
+                </div>
+              </div>
+              <div id="resetFaceStatus" style="font-size:.82rem;margin-bottom:10px;text-align:center;min-height:18px;color:var(--muted)"></div>
+              <div id="resetFaceBtn-start" style="display:flex;gap:10px">
+                <button class="btn btn-primary" style="flex:1" onclick="resetStartCamera()">
+                  <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;flex-shrink:0;vertical-align:middle"><path d="M12 15.2A3.2 3.2 0 1 0 12 8.8a3.2 3.2 0 0 0 0 6.4zm0 1.8a5 5 0 1 1 0-10 5 5 0 0 1 0 10zM20 4h-3.17L15 2H9L7.17 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/></svg> Open Camera
+                </button>
+              </div>
+              <div id="resetFaceBtn-capture" style="display:none">
+                <button class="btn btn-primary" style="width:100%" onclick="resetCaptureFace()">
+                  <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;flex-shrink:0;vertical-align:middle"><path d="M12 15.2A3.2 3.2 0 1 0 12 8.8a3.2 3.2 0 0 0 0 6.4zm0 1.8a5 5 0 1 1 0-10 5 5 0 0 1 0 10zM20 4h-3.17L15 2H9L7.17 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/></svg> Capture Face
+                </button>
+              </div>
+              <div id="resetFaceBtn-retake" style="display:none;gap:10px">
+                <button class="btn btn-primary" style="flex:1;background:transparent;border:2px solid var(--border);color:var(--text)" onclick="resetRetake()">
+                  <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;flex-shrink:0;vertical-align:middle"><path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg> Retake
+                </button>
+              </div>
+              <button class="btn btn-primary btn-block" id="btnResetPin" onclick="doResetPin()" disabled style="opacity:.5;margin-top:12px">
+                <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;flex-shrink:0;vertical-align:middle"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg> Reset PIN
+              </button>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- UPDATE FACE PAGE -->
+    <div class="page" id="page-update-face">
+      <div class="page-hdr"><h1>Update Face</h1><p>Verify your identity then register a new face scan</p></div>
+      <div style="max-width:480px;margin:0 auto">
+        <div class="card">
+          <div class="card-hdr" style="flex-direction:column;align-items:center;text-align:center;padding:24px 24px 16px">
+            <div class="card-hdr-icon" style="background:linear-gradient(135deg,#00c896,#0096c7)">
+              <svg viewBox="0 0 24 24"><path fill="#fff" d="M9 11.75A1.25 1.25 0 1 0 9 14.25 1.25 1.25 0 0 0 9 11.75zm6 0a1.25 1.25 0 1 0 0 2.5 1.25 1.25 0 0 0 0-2.5zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8 0-.29.02-.58.05-.86 2.36-1.05 4.23-2.98 5.21-5.37C11.07 8.33 13.93 10 17.14 10c.79 0 1.55-.1 2.28-.27C19.73 10.11 20 11.03 20 12c0 4.41-3.59 8-8 8z"/></svg>
+            </div>
+            <div class="card-hdr-txt"><h2>Update Face</h2><p>2 steps: identity → face scan</p></div>
+          </div>
+          <div class="card-body">
+            <div id="updateFaceMsg" class="msg"></div>
+
+            <!-- STEP 1: Phone + National ID -->
+            <div id="uf-step1">
+              <p style="font-size:.82rem;color:var(--muted);margin-bottom:14px;text-align:center"><strong>Step 1 of 2</strong> — Verify your identity</p>
+              <div id="ufIdentityMsg" class="msg"></div>
+              <div class="field">
+                <label class="lbl">Phone Number</label>
+                <input type="tel" id="updateFacePhone" placeholder="e.g. 0780000000" autocomplete="off" oninput="document.getElementById('ufIdentityMsg').textContent=''">
+              </div>
+              <div class="field">
+                <label class="lbl">National ID (16 digits)</label>
+                <input type="text" id="updateFaceNatId" placeholder="Enter your 16-digit National ID" maxlength="16" inputmode="numeric" oninput="document.getElementById('ufIdentityMsg').textContent=''">
+              </div>
+              <button class="btn btn-primary btn-block" id="btnUfVerifyId" onclick="ufVerifyIdentity()">
+                <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;flex-shrink:0;vertical-align:middle"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg> Verify Identity
+              </button>
+            </div>
+
+            <!-- STEP 2: Face Scan -->
+            <div id="uf-step2" style="display:none">
+              <p style="font-size:.82rem;color:var(--muted);margin-bottom:14px;text-align:center">
+                <strong>Step 2 of 2</strong> — Scan your face
+                <span id="ufVerifiedName" style="display:block;color:var(--accent);font-weight:600;margin-top:4px"></span>
+              </p>
+              <p style="font-size:.8rem;color:var(--muted);margin-bottom:10px">Your new face must match the face already on this account. Eyes, nose, mouth and chin must be clearly visible.</p>
+              <div style="border-radius:12px;overflow:hidden;background:#000;margin-bottom:10px;min-height:140px;display:flex;align-items:center;justify-content:center;position:relative">
+                <video id="ufVideo" autoplay playsinline style="display:none;width:100%;max-height:200px;transform:scaleX(-1)"></video>
+                <canvas id="ufCanvas" style="display:none"></canvas>
+                <img id="ufPreview" style="display:none;width:100%;max-height:200px;object-fit:cover">
+                <div id="ufPrompt" style="color:#555;font-size:.85rem;padding:30px;text-align:center">
+                  <div style="display:flex;flex-direction:column;align-items:center">
+                    <svg viewBox="0 0 24 24" style="width:40px;height:40px;fill:var(--muted);margin-bottom:8px"><path d="M12 15.2A3.2 3.2 0 1 0 12 8.8a3.2 3.2 0 0 0 0 6.4zm0 1.8a5 5 0 1 1 0-10 5 5 0 0 1 0 10zM20 4h-3.17L15 2H9L7.17 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/></svg>
+                    <span>Click below to open camera</span>
+                  </div>
+                </div>
+              </div>
+              <div id="ufStatus" style="font-size:.82rem;margin-bottom:10px;text-align:center;min-height:18px;color:var(--muted)"></div>
+              <div id="ufBtn-start">
+                <button class="btn btn-primary" style="width:100%" onclick="ufStartCamera()">
+                  <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;flex-shrink:0;vertical-align:middle"><path d="M12 15.2A3.2 3.2 0 1 0 12 8.8a3.2 3.2 0 0 0 0 6.4zm0 1.8a5 5 0 1 1 0-10 5 5 0 0 1 0 10zM20 4h-3.17L15 2H9L7.17 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/></svg> Open Camera
+                </button>
+              </div>
+              <div id="ufBtn-capture" style="display:none">
+                <button class="btn btn-primary" style="width:100%" onclick="ufCapture()">
+                  <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;flex-shrink:0;vertical-align:middle"><path d="M12 15.2A3.2 3.2 0 1 0 12 8.8a3.2 3.2 0 0 0 0 6.4zm0 1.8a5 5 0 1 1 0-10 5 5 0 0 1 0 10zM20 4h-3.17L15 2H9L7.17 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/></svg> Capture Face
+                </button>
+              </div>
+              <div id="ufBtn-retake" style="display:none;gap:10px">
+                <button class="btn btn-primary" style="flex:1;background:transparent;border:2px solid var(--border);color:var(--text)" onclick="ufRetake()">
+                  <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;flex-shrink:0;vertical-align:middle"><path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg> Retake
+                </button>
+              </div>
+              <button class="btn btn-primary btn-block" id="btnUpdateFace" onclick="doUpdateFace()" disabled style="opacity:.5;margin-top:12px">
+                <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;flex-shrink:0;vertical-align:middle"><path d="M9 11.75A1.25 1.25 0 1 0 9 14.25 1.25 1.25 0 0 0 9 11.75zm6 0a1.25 1.25 0 1 0 0 2.5 1.25 1.25 0 0 0 0-2.5zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8 0-.29.02-.58.05-.86 2.36-1.05 4.23-2.98 5.21-5.37C11.07 8.33 13.93 10 17.14 10c.79 0 1.55-.1 2.28-.27C19.73 10.11 20 11.03 20 12c0 4.41-3.59 8-8 8z"/></svg> Update Face
+              </button>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- PIN MODAL — uses device keyboard -->
+  <div id="pinModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;align-items:center;justify-content:center">
+    <div style="background:var(--card);border-radius:20px;padding:32px;width:320px;box-shadow:0 20px 60px rgba(0,0,0,.4);text-align:center">
+      <div style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
+        <svg viewBox="0 0 24 24" style="width:28px;height:28px;fill:#fff"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+      </div>
+      <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:4px">Enter PIN</h3>
+      <p style="color:var(--muted);font-size:.82rem;margin-bottom:16px">Your 4–6 digit transaction PIN</p>
+      <div id="pinModalMsg" style="display:none;padding:8px 12px;border-radius:8px;font-size:.82rem;margin-bottom:12px;background:rgba(220,38,38,.1);color:var(--danger);border:1px solid rgba(220,38,38,.2)"></div>
+      <input type="password" id="pinInput" inputmode="numeric" maxlength="6" placeholder="••••"
+             style="width:100%;padding:14px;text-align:center;font-size:1.6rem;letter-spacing:.5rem;border-radius:10px;border:2px solid var(--border);background:var(--surface);color:var(--text);font-family:'JetBrains Mono',monospace;margin-bottom:20px"
+             oninput="this.value=this.value.replace(/\D/g,'')"
+             onkeydown="if(event.key==='Enter') confirmPin()">
+      <div style="display:flex;gap:10px">
+        <button class="btn btn-ghost" style="flex:1" onclick="closePinModal()">Cancel</button>
+        <button class="btn btn-primary" style="flex:1" id="btnConfirmPin" onclick="confirmPin()">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- FACE MODAL -->
+  <div id="faceModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1001;align-items:center;justify-content:center">
+    <div style="background:var(--card);border-radius:20px;padding:28px;width:380px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.4);text-align:center">
+      <div style="width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;margin:0 auto 12px">
+        <svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:#fff"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>
+      </div>
+      <h3 style="font-size:1.05rem;font-weight:700;margin-bottom:6px">Identity Verification Required</h3>
+      <p id="faceModalMsg" style="color:var(--muted);font-size:.8rem;margin-bottom:14px;line-height:1.4"></p>
+
+      <!-- Camera / Preview area -->
+      <div style="position:relative;border-radius:12px;overflow:hidden;background:#000;margin-bottom:10px;min-height:160px;display:flex;align-items:center;justify-content:center">
+        <video id="faceVideo" autoplay playsinline style="display:none;width:100%;max-height:220px;transform:scaleX(-1)"></video>
+        <canvas id="faceCanvas" style="display:none"></canvas>
+        <img id="facePreviewImg" style="display:none;width:100%;max-height:220px;object-fit:cover">
+        <div id="faceCameraPlaceholder" style="color:#555;font-size:.85rem;padding:40px">
+          <div style="display:flex;justify-content:center"><svg viewBox="0 0 24 24" style="width:40px;height:40px;fill:var(--muted);margin-bottom:8px"><path d="M12 15.2A3.2 3.2 0 1 0 12 8.8a3.2 3.2 0 0 0 0 6.4zm0 1.8a5 5 0 1 1 0-10 5 5 0 0 1 0 10zM20 4h-3.17L15 2H9L7.17 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/></svg></div>
+          Click "Start Camera" to begin
+        </div>
+      </div>
+
+      <div id="faceStatus" style="font-size:.8rem;color:var(--muted);margin-bottom:14px;min-height:20px;text-align:center"></div>
+
+      <!-- Buttons — all same size and style -->
+      <div id="faceBtn-start" style="display:flex;gap:10px;justify-content:center">
+        <button class="btn btn-primary" style="flex:1;max-width:160px" onclick="startFaceCamera()"><svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;flex-shrink:0;vertical-align:middle"><path d="M12 15.2A3.2 3.2 0 1 0 12 8.8a3.2 3.2 0 0 0 0 6.4zm0 1.8a5 5 0 1 1 0-10 5 5 0 0 1 0 10zM20 4h-3.17L15 2H9L7.17 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/></svg> Start Camera</button>
+        <button class="btn btn-primary" style="flex:1;max-width:160px;background:transparent;border:2px solid var(--border);color:var(--muted)" onclick="closeFaceModal()">Cancel</button>
+      </div>
+      <div id="faceBtn-capture" style="display:none;justify-content:center">
+        <button class="btn btn-primary" style="width:100%" onclick="captureFace()">📸 Capture</button>
+        <button class="btn btn-primary" style="width:100%;margin-top:10px;background:transparent;border:2px solid var(--border);color:var(--muted)" onclick="closeFaceModal()">Cancel</button>
+      </div>
+      <div id="faceBtn-confirm" style="display:none;gap:10px;flex-direction:column">
+        <button class="btn btn-primary" style="width:100%" id="btnSubmitFace" onclick="submitFaceVerification()"><svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;flex-shrink:0;vertical-align:middle"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg> Confirm Transfer</button>
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-primary" style="flex:1;background:transparent;border:2px solid var(--border);color:var(--text)" onclick="retakeFace()"><svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;flex-shrink:0;vertical-align:middle"><path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg> Retake</button>
+          <button class="btn btn-primary" style="flex:1;background:transparent;border:2px solid var(--border);color:var(--muted)" onclick="closeFaceModal()">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const API   = '';
+const TOKEN = () => localStorage.getItem('session_token');
+let currentUser   = null;
+let feeDebounce   = null;
+let recipientName = null;
+ 
+/* ── helpers ─────────────────────────────────────────────────────────── */
+function fmtRWF(n) { return Number(n || 0).toLocaleString() + ' RWF'; }
+function fmtDate(s) { return s ? new Date(s).toLocaleString() : '—'; }
+ 
+function showMsg(id, txt, type = 'success') {
+  const el = document.getElementById(id);
+  el.className = `msg msg-${type} show`;
+  el.innerHTML = txt;
+  setTimeout(() => el.classList.remove('show'), 8000);
+}
+ 
+function setBtn(id, on, txt) {
+  const b = document.getElementById(id);
+  b.innerHTML = on ? `<span class="spinner"></span> ${txt}` : txt;
+  b.disabled  = on;
+}
+ 
+/* ── navigation ─────────────────────────────────────────────────────── */
+function showPage(p) {
+  document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  document.getElementById(`page-${p}`).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(btn => {
+    if (btn.getAttribute('onclick') && btn.getAttribute('onclick').includes(`'${p}'`))
+      btn.classList.add('active');
+  });
+  if (p === 'history') loadHistory();
+  if (p === 'profile') loadProfile();
+  if (p === 'balance') loadBalance();
+}
+ 
+/* ── auth / init ─────────────────────────────────────────────────────── */
+async function init() {
+  const token = TOKEN();
+  if (!token) { window.location.href = '/login'; return; }
+  try {
+    const r = await fetch(`${API}/api/validate-session`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_token: token })
+    });
+    const d = await r.json();
+    if (!d.success) { window.location.href = '/login'; return; }
+    currentUser = d.user;
+    updateSidebar();
+    loadBalance();
+  } catch { window.location.href = '/login'; }
+}
+ 
+function updateSidebar() {
+  if (!currentUser) return;
+  document.getElementById('sidebarName').textContent    = currentUser.name  || '—';
+  document.getElementById('sidebarPhone').textContent   = currentUser.phone || '—';
+  document.getElementById('sidebarBalance').textContent = fmtRWF(currentUser.balance);
+  document.getElementById('bigBalance').textContent     = fmtRWF(currentUser.balance);
+ 
+  if (currentUser.name) {
+    const names = currentUser.name.trim().split(' ');
+    const initials = names.length >= 2
+      ? (names[0][0] + names[names.length - 1][0]).toUpperCase()
+      : names[0].substring(0, 2).toUpperCase();
+    document.getElementById('userInitials').textContent = initials;
+  }
+}
+ 
+function doLogout() {
+  fetch(`${API}/api/logout`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_token: TOKEN() })
+  }).catch(() => {});
+  localStorage.clear();
+  window.location.href = '/login';
+}
+ 
+/* ── balance ─────────────────────────────────────────────────────────── */
+async function loadBalance() {
+  if (!currentUser) return;
+  document.getElementById('bigBalance').textContent = fmtRWF(currentUser.balance);
+  try {
+    const r = await fetch(`${API}/api/transfer-history?limit=5`, {
+      headers: { 'Authorization': `Bearer ${TOKEN()}` }
+    });
+    const d = await r.json();
+    if (d.success && d.transfers) {
+      const html = d.transfers.length
+        ? d.transfers.map(t => {
+            const isSent = t.direction === 'sent';
+            const other  = isSent ? (t.recipient || t.recipient_phone || '—') : (t.sender_phone || '—');
+            return `
+              <div style="padding:12px 24px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+                <div>
+                  <div style="font-weight:600">${isSent ? '→ ' + other : '← ' + other}</div>
+                  <div style="font-size:.75rem;color:var(--muted)">${fmtDate(t.created_at)}</div>
+                </div>
+                <div style="font-weight:600;color:${isSent ? 'var(--danger)' : 'var(--accent)'}">
+                  ${isSent ? '-' : '+'}${fmtRWF(Math.abs(t.amount))}
+                </div>
+              </div>`;
+          }).join('')
+        : '<div class="empty-state">No recent transactions</div>';
+      document.getElementById('balanceHistory').innerHTML = html;
+    }
+  } catch (e) { console.error('Balance history error:', e); }
+}
+ 
+/* ── recipient lookup ────────────────────────────────────────────────── */
+function onPhoneInput() {
+  recipientName = null;
+  document.getElementById('recipientPreview').classList.remove('show');
+}
+ 
+async function lookupRecipient() {
+  const raw = document.getElementById('recipientPhone').value.trim().replace(/\D/g, '');
+  // Strip leading 0 if user typed e.g. 0783287066 instead of 783287066
+  const digits = raw.startsWith('0') ? raw.slice(1) : raw;
+  if (digits.length < 9) return;
+  const phone = '+250' + digits;
+ 
+  const preview = document.getElementById('recipientPreview');
+ 
+  // Self-transfer check: compare 9-digit core with stored phone
+  const userCore = (currentUser?.phone || '').replace(/^\+?250/, '');
+  if (currentUser && userCore && userCore === digits) {
+    preview.textContent = '✗ You cannot send money to your own account';
+    preview.style.color = 'var(--danger)';
+    preview.classList.add('show');
+    return;
+  }
+ 
+  try {
+    const r = await fetch(`${API}/api/check-recipient`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone })
+    });
+    const d = await r.json();
+    if (d.success && d.registered) {
+      recipientName = d.name;
+      preview.textContent = d.name;
+      preview.style.color = 'var(--accent)';
+      preview.classList.add('show');
+      fetchFeePreview();
+    } else {
+      preview.textContent = '✗ Number not registered on MoMo Shield';
+      preview.style.color = 'var(--danger)';
+      preview.classList.add('show');
+    }
+  } catch { /* silent */ }
+}
+ 
+/* ── fee preview ─────────────────────────────────────────────────────── */
+function onAmountInput() {
+  clearTimeout(feeDebounce);
+  feeDebounce = setTimeout(fetchFeePreview, 600);
+}
+ 
+async function fetchFeePreview() {
+  const raw = document.getElementById('recipientPhone').value.trim().replace(/\D/g, '');
+  const digits = raw.startsWith('0') ? raw.slice(1) : raw;
+  const amount = parseFloat(document.getElementById('transferAmount').value);
+  if (!digits || digits.length < 9 || !amount || amount < 100) {
+    document.getElementById('feePreview').classList.remove('show');
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/api/calculate-fee`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: '+250' + digits, amount })
+    });
+    const d = await r.json();
+    if (d.success) {
+      document.getElementById('feeAmt').textContent   = fmtRWF(d.amount);
+      document.getElementById('feeFee').textContent   = fmtRWF(d.fee);
+      document.getElementById('feeTotal').textContent = fmtRWF(d.total);
+      document.getElementById('feePreview').classList.add('show');
+    }
+  } catch { /* silent */ }
+}
+ 
+/* ── transfer — PIN first ────────────────────────────────────────────── */
+let pendingTransferData = null;
+let capturedFaceB64     = null;
+let faceStream          = null;
+
+function doTransfer() {
+  const raw    = document.getElementById('recipientPhone').value.trim().replace(/\D/g, '');
+  const digits = raw.startsWith('0') ? raw.slice(1) : raw;
+  const amount = parseFloat(document.getElementById('transferAmount').value);
+
+  if (!digits || digits.length < 9) {
+    showMsg('transferMsg', 'Please enter a valid 9-digit phone number.', 'error'); return;
+  }
+  if (!amount || amount < 100) {
+    showMsg('transferMsg', 'Minimum transfer amount is 100 RWF.', 'error'); return;
+  }
+
+  pendingTransferData = { recipientPhone: '+250' + digits, amount };
+  openPinModal();
+}
+
+/* ── PIN modal (device keyboard) ─────────────────────────────────────── */
+function openPinModal() {
+  const inp = document.getElementById('pinInput');
+  inp.value = '';
+  document.getElementById('pinModalMsg').style.display = 'none';
+  document.getElementById('pinModal').style.display = 'flex';
+  setTimeout(() => inp.focus(), 100);
+}
+
+function closePinModal() {
+  document.getElementById('pinModal').style.display = 'none';
+  document.getElementById('pinInput').value = '';
+}
+
+async function confirmPin() {
+  const pin = document.getElementById('pinInput').value.trim();
+  if (pin.length < 4) {
+    showPinError('PIN must be at least 4 digits.'); return;
+  }
+  document.getElementById('btnConfirmPin').disabled = true;
+  try {
+    const r = await fetch(`${API}/api/verify-pin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${TOKEN()}` },
+      body: JSON.stringify({ session_token: TOKEN(), pin })
+    });
+    const d = await r.json();
+    document.getElementById('btnConfirmPin').disabled = false;
+
+    if (d.success) {
+      closePinModal();
+      await executeTransfer();
+    } else if (d.blocked) {
+      closePinModal();
+      showMsg('transferMsg', 'Your PIN is blocked after 3 incorrect attempts. Go to Reset PIN to unblock.', 'error');
+    } else {
+      const remaining = d.remaining !== undefined ? ` (${d.remaining} attempt${d.remaining !== 1 ? 's' : ''} left)` : '';
+      showPinError(`Incorrect PIN${remaining}.`);
+      document.getElementById('pinInput').value = '';
+    }
+  } catch {
+    document.getElementById('btnConfirmPin').disabled = false;
+    showPinError('Network error. Try again.');
+  }
+}
+
+function showPinError(msg) {
+  const el = document.getElementById('pinModalMsg');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+async function executeTransfer() {
+  if (!pendingTransferData) return;
+  setBtn('btnTransfer', true, 'Processing...');
+  try {
+    const r = await fetch(`${API}/api/transfer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${TOKEN()}` },
+      body: JSON.stringify({
+        recipient_phone: pendingTransferData.recipientPhone,
+        amount:          pendingTransferData.amount,
+        transfer_type:   'mobile_money'
+      })
+    });
+    const d = await r.json();
+
+    if (d.success) {
+      const toName = recipientName || pendingTransferData.recipientPhone;
+      showMsg('transferMsg', `Transfer successful! ${fmtRWF(pendingTransferData.amount)} sent to ${toName}. Ref: ${d.reference || '—'}`, 'success');
+      document.getElementById('recipientPhone').value = '';
+      document.getElementById('transferAmount').value = '';
+      document.getElementById('recipientPreview').classList.remove('show');
+      document.getElementById('feePreview').classList.remove('show');
+      recipientName = null;
+      await refreshBalance();
+    } else if (d.face_required) {
+      const alertMsg = (d.alert && d.alert.message) ? d.alert.message : (d.message || 'Unusual activity detected.');
+      openFaceModal(alertMsg);
+    } else if (d.action === 'BLOCK') {
+      showMsg('transferMsg', `⛔ Transfer blocked: ${d.error || ''}`, 'error');
+    } else {
+      showMsg('transferMsg', d.error || 'Transfer failed. Please try again.', 'error');
+    }
+  } catch {
+    showMsg('transferMsg', 'Network error. Please try again.', 'error');
+  } finally {
+    setBtn('btnTransfer', false, '<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;flex-shrink:0;vertical-align:middle"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg> Send Money');
+  }
+}
+
+/* ── Reset PIN — Step 1: verify identity ─────────────────────────────── */
+let rpVerifiedPhone = null;   // normalised phone after successful identity verify
+
+async function rpVerifyIdentity() {
+  const phone = document.getElementById('resetPhone').value.trim();
+  const natId = document.getElementById('resetNationalId').value.trim();
+  const msgEl = document.getElementById('rpIdentityMsg');
+
+  msgEl.className = 'msg'; msgEl.style.display = 'none';
+
+  if (!phone) { _showInlineMsg(msgEl, 'Phone number is required.', 'error'); return; }
+  if (!natId)  { _showInlineMsg(msgEl, 'National ID is required.', 'error'); return; }
+
+  const btn = document.getElementById('btnRpVerifyId');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Verifying…';
+
+  try {
+    const r = await fetch(`${API}/api/verify-identity`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone_number: phone, national_id: natId })
+    });
+    const d = await r.json();
+    if (d.success) {
+      rpVerifiedPhone = phone;
+      document.getElementById('rpVerifiedName').textContent = '✓ Verified: ' + d.name;
+      // Move to step 2
+      document.getElementById('rp-step1').style.display = 'none';
+      document.getElementById('rp-step2').style.display = 'block';
+    } else {
+      _showInlineMsg(msgEl, d.error || 'Identity verification failed.', 'error');
+    }
+  } catch {
+    _showInlineMsg(msgEl, 'Network error. Please try again.', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;flex-shrink:0;vertical-align:middle"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg> Verify Identity';
+  }
+}
+
+function rpCheckPinMatch() {
+  const p1  = document.getElementById('resetNewPin').value;
+  const p2  = document.getElementById('resetConfirmPin').value;
+  const msg = document.getElementById('rpPinMatchMsg');
+  if (!p1 || !p2) { msg.textContent = ''; return; }
+  if (p1 === p2 && p1.length >= 4) {
+    msg.textContent = '✓ PINs match';
+    msg.style.color = 'var(--accent)';
+    // Show step 3
+    document.getElementById('rp-step3').style.display = 'block';
+  } else {
+    msg.textContent = p1.length >= 4 && p2.length >= 1 ? '✗ PINs do not match' : '';
+    msg.style.color = 'var(--danger)';
+    document.getElementById('rp-step3').style.display = 'none';
+  }
+}
+
+/* ── Update Face — Step 1: verify identity ───────────────────────────── */
+let ufVerifiedPhone = null;
+
+async function ufVerifyIdentity() {
+  const phone = document.getElementById('updateFacePhone').value.trim();
+  const natId = document.getElementById('updateFaceNatId').value.trim();
+  const msgEl = document.getElementById('ufIdentityMsg');
+
+  msgEl.className = 'msg'; msgEl.style.display = 'none';
+
+  if (!phone) { _showInlineMsg(msgEl, 'Phone number is required.', 'error'); return; }
+  if (!natId)  { _showInlineMsg(msgEl, 'National ID is required.', 'error'); return; }
+
+  const btn = document.getElementById('btnUfVerifyId');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Verifying…';
+
+  try {
+    const r = await fetch(`${API}/api/verify-identity`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone_number: phone, national_id: natId })
+    });
+    const d = await r.json();
+    if (d.success) {
+      ufVerifiedPhone = phone;
+      document.getElementById('ufVerifiedName').textContent = '✓ Verified: ' + d.name;
+      document.getElementById('uf-step1').style.display = 'none';
+      document.getElementById('uf-step2').style.display = 'block';
+    } else {
+      _showInlineMsg(msgEl, d.error || 'Identity verification failed.', 'error');
+    }
+  } catch {
+    _showInlineMsg(msgEl, 'Network error. Please try again.', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;flex-shrink:0;vertical-align:middle"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg> Verify Identity';
+  }
+}
+
+function _showInlineMsg(el, txt, type) {
+  el.className = `msg msg-${type} show`;
+  el.textContent = txt;
+  el.style.display = 'block';
+}
+
+/* ── Reset PIN ───────────────────────────────────────────────────────── */
+let resetFaceStream = null;
+let resetFaceB64    = null;
+
+function _resetFaceBtns(state) {
+  document.getElementById('resetFaceBtn-start').style.display   = state === 'start'   ? 'flex' : 'none';
+  document.getElementById('resetFaceBtn-capture').style.display = state === 'capture' ? 'block' : 'none';
+  document.getElementById('resetFaceBtn-retake').style.display  = state === 'retake'  ? 'flex' : 'none';
+  // Enable Reset PIN button only when face is ready
+  document.getElementById('btnResetPin').disabled = state !== 'retake';
+  document.getElementById('btnResetPin').style.opacity = state === 'retake' ? '1' : '.5';
+}
+
+async function resetStartCamera() {
+  try {
+    document.getElementById('resetFaceStatus').textContent = 'Starting camera…';
+    resetFaceStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false
+    });
+    const v = document.getElementById('resetFaceVideo');
+    v.srcObject = resetFaceStream;
+    v.style.display = 'block';
+    document.getElementById('resetFacePrompt').style.display  = 'none';
+    document.getElementById('resetFacePreview').style.display = 'none';
+    _resetFaceBtns('capture');
+    document.getElementById('resetFaceStatus').textContent = 'Centre your face fully in frame, then click Capture.';
+  } catch (e) {
+    document.getElementById('resetFaceStatus').textContent = 'Camera error: ' + e.message;
+  }
+}
+
+async function resetCaptureFace() {
+  const v = document.getElementById('resetFaceVideo');
+  const c = document.getElementById('resetFaceCanvas');
+  c.width = v.videoWidth || 1280; c.height = v.videoHeight || 720;
+  const ctx = c.getContext('2d');
+  ctx.translate(c.width, 0); ctx.scale(-1, 1);
+  ctx.drawImage(v, 0, 0);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  // Quality check — reject immediately with clear guidance
+  const data = ctx.getImageData(0, 0, c.width, c.height).data;
+  let bright = 0;
+  for (let i = 0; i < data.length; i += 4) bright += (data[i] + data[i+1] + data[i+2]) / 3;
+  const avg = bright / (data.length / 4);
+  if (avg < 25 || avg > 230) {
+    document.getElementById('resetFaceStatus').textContent =
+      avg < 25
+        ? 'Too dark — move to a brighter area and try again.'
+        : 'Too bright — reduce glare or move from direct light.';
+    return; // stay on capture, user retries naturally
+  }
+
+  const b64 = c.toDataURL('image/jpeg', 0.95).split(',')[1];
+  if (resetFaceStream) { resetFaceStream.getTracks().forEach(t => t.stop()); resetFaceStream = null; }
+  v.style.display = 'none';
+  const prev = document.getElementById('resetFacePreview');
+  prev.src = 'data:image/jpeg;base64,' + b64;
+  prev.style.display = 'block';
+  document.getElementById('resetFaceStatus').textContent = 'Validating face quality…';
+  _resetFaceBtns('retake'); // show retake, keep Reset PIN disabled until validated
+
+  // Validate quality with server before enabling Reset PIN
+  try {
+    const vr = await fetch(`${API}/api/validate-face`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ face_base64: b64 })
+    });
+    const vd = await vr.json();
+    if ((vd.success || vd.face_detected) && vd.face_count > 0) {
+      resetFaceB64 = b64;
+      document.getElementById('resetFaceStatus').textContent = '✓ Face validated. Click Reset PIN to continue.';
+      document.getElementById('btnResetPin').disabled = false;
+      document.getElementById('btnResetPin').style.opacity = '1';
+    } else {
+      resetFaceB64 = null;
+      document.getElementById('resetFaceStatus').textContent = vd.error || 'Face not accepted. Please retake — look directly at the camera.';
+      document.getElementById('btnResetPin').disabled = true;
+      document.getElementById('btnResetPin').style.opacity = '.5';
+    }
+  } catch {
+    resetFaceB64 = null;
+    document.getElementById('resetFaceStatus').textContent = 'Validation failed. Please retake.';
+    document.getElementById('btnResetPin').disabled = true;
+    document.getElementById('btnResetPin').style.opacity = '.5';
+  }
+}
+
+function resetRetake() {
+  resetFaceB64 = null;
+  document.getElementById('resetFacePreview').style.display = 'none';
+  document.getElementById('resetFaceStatus').textContent    = '';
+  _resetFaceBtns('start');
+  document.getElementById('resetFacePrompt').style.display  = 'block';
+}
+
+async function doResetPin() {
+  const nationalId   = document.getElementById('resetNationalId').value.trim();
+  const newPin       = document.getElementById('resetNewPin').value.trim();
+  const confirmPin_  = document.getElementById('resetConfirmPin').value.trim();
+
+  if (!nationalId)        { showMsg('resetPinMsg', 'Please enter your National ID.', 'error'); return; }
+  if (newPin.length < 4)  { showMsg('resetPinMsg', 'PIN must be at least 4 digits.', 'error'); return; }
+  if (newPin !== confirmPin_) { showMsg('resetPinMsg', 'PINs do not match.', 'error'); return; }
+  if (!resetFaceB64)      { showMsg('resetPinMsg', 'Please scan your face first.', 'error'); return; }
+
+  setBtn('btnResetPin', true, 'Verifying…');
+  try {
+    const r = await fetch(`${API}/api/reset-pin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${TOKEN()}` },
+      body: JSON.stringify({ session_token: TOKEN(), national_id: nationalId, new_pin: newPin, face_base64: resetFaceB64 })
+    });
+    const d = await r.json();
+    if (d.success) {
+      showMsg('resetPinMsg', 'PIN reset successfully! You can now use your new PIN.', 'success');
+      // Reset all fields and go back to step 1
+      document.getElementById('resetPhone').value       = '';
+      document.getElementById('resetNationalId').value  = '';
+      document.getElementById('resetNewPin').value      = '';
+      document.getElementById('resetConfirmPin').value  = '';
+      document.getElementById('rpPinMatchMsg').textContent = '';
+      rpVerifiedPhone = null;
+      document.getElementById('rp-step1').style.display = 'block';
+      document.getElementById('rp-step2').style.display = 'none';
+      document.getElementById('rp-step3').style.display = 'none';
+      resetRetake();
+    } else if (d.face_failed || (d.error && d.error.toLowerCase().includes('face'))) {
+      // Face mismatch — ask to retake
+      resetFaceB64 = null;
+      document.getElementById('resetFacePreview').style.display = 'none';
+      document.getElementById('resetFaceStatus').textContent =
+        'Face does not match your registered face. Please retake a clearer photo.';
+      _resetFaceBtns('start');
+      document.getElementById('resetFacePrompt').style.display = 'block';
+    } else {
+      showMsg('resetPinMsg', d.error || 'Reset failed. Check your National ID and face.', 'error');
+    }
+  } catch {
+    showMsg('resetPinMsg', 'Network error. Please try again.', 'error');
+  } finally {
+    setBtn('btnResetPin', false, 'Reset PIN');
+  }
+}
+ 
+/* refresh balance from server */
+async function refreshBalance() {
+  try {
+    const r = await fetch(`${API}/api/validate-session`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_token: TOKEN() })
+    });
+    const d = await r.json();
+    if (d.success) {
+      currentUser = d.user;
+      updateSidebar();
+      loadBalance();
+    }
+  } catch { /* silent */ }
+}
+ 
+/* ── Update Face ─────────────────────────────────────────────────────── */
+let ufStream = null;
+let ufFaceB64 = null;
+
+function ufStartCamera() {
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } })
+    .then(stream => {
+      ufStream = stream;
+      const v = document.getElementById('ufVideo');
+      v.srcObject = stream;
+      v.style.display = 'block';
+      document.getElementById('ufPrompt').style.display = 'none';
+      document.getElementById('ufBtn-start').style.display = 'none';
+      document.getElementById('ufBtn-capture').style.display = 'block';
+      document.getElementById('ufStatus').textContent = 'Camera ready. Look directly at the camera.';
+    })
+    .catch(() => showMsg('updateFaceMsg', 'Camera access denied. Please allow camera permissions.', 'error'));
+}
+
+async function ufCapture() {
+  const video  = document.getElementById('ufVideo');
+  const canvas = document.getElementById('ufCanvas');
+  canvas.width  = video.videoWidth  || 640;
+  canvas.height = video.videoHeight || 480;
+  const ctx = canvas.getContext('2d');
+  ctx.save(); ctx.scale(-1, 1); ctx.drawImage(video, -canvas.width, 0); ctx.restore();
+  const ufB64 = canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
+
+  // Show preview immediately
+  const preview = document.getElementById('ufPreview');
+  preview.src = 'data:image/jpeg;base64,' + ufB64;
+  preview.style.display = 'block';
+  video.style.display = 'none';
+  document.getElementById('ufBtn-capture').style.display = 'none';
+  document.getElementById('ufBtn-retake').style.display = 'flex';
+  document.getElementById('ufStatus').textContent = 'Validating face quality…';
+
+  // Stop camera
+  if (ufStream) { ufStream.getTracks().forEach(t => t.stop()); ufStream = null; }
+
+  // Keep submit disabled until server validates
+  const btn = document.getElementById('btnUpdateFace');
+  btn.disabled = true; btn.style.opacity = '.5';
+
+  try {
+    const vr = await fetch(`${API}/api/validate-face`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ face_base64: ufB64 })
+    });
+    const vd = await vr.json();
+    if ((vd.success || vd.face_detected) && vd.face_count > 0) {
+      ufFaceB64 = ufB64;
+      document.getElementById('ufStatus').textContent = '✓ Face validated. Click Update Face to save.';
+      btn.disabled = false; btn.style.opacity = '1';
+    } else {
+      ufFaceB64 = null;
+      document.getElementById('ufStatus').textContent = vd.error || 'Face not accepted. Please retake — look directly at the camera.';
+    }
+  } catch {
+    ufFaceB64 = null;
+    document.getElementById('ufStatus').textContent = 'Validation failed. Please retake.';
+  }
+}
+
+function ufRetake() {
+  ufFaceB64 = null;
+  document.getElementById('ufPreview').style.display = 'none';
+  document.getElementById('ufPrompt').style.display = 'block';
+  document.getElementById('ufBtn-retake').style.display = 'none';
+  document.getElementById('ufBtn-start').style.display = 'block';
+  document.getElementById('ufBtn-capture').style.display = 'none';
+  document.getElementById('ufStatus').textContent = '';
+  const btn = document.getElementById('btnUpdateFace');
+  btn.disabled = true; btn.style.opacity = '.5';
+}
+
+async function doUpdateFace() {
+  const phone     = document.getElementById('updateFacePhone').value.trim();
+  const natId     = document.getElementById('updateFaceNatId').value.trim();
+  const msgEl     = 'updateFaceMsg';
+
+  if (!phone)    return showMsg(msgEl, 'Phone number is required.', 'error');
+  if (!natId)    return showMsg(msgEl, 'National ID is required.', 'error');
+  if (!ufFaceB64) return showMsg(msgEl, 'Please capture your face first.', 'error');
+
+  const btn = document.getElementById('btnUpdateFace');
+  setBtn('btnUpdateFace', true, 'Verifying…');
+  showMsg(msgEl, '', '');
+
+  try {
+    const r = await fetch(`${API}/api/update-face`, {
+      method : 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${TOKEN()}` },
+      body   : JSON.stringify({
+        session_token: TOKEN(),
+        phone_number : phone,
+        national_id  : natId,
+        face_base64  : ufFaceB64,
+      }),
+    });
+    const d = await r.json();
+    if (d.success) {
+      showMsg(msgEl, 'Face updated successfully! Your new face is now registered.', 'success');
+      ufRetake();
+      document.getElementById('updateFacePhone').value = '';
+      document.getElementById('updateFaceNatId').value  = '';
+      ufVerifiedPhone = null;
+      document.getElementById('uf-step1').style.display = 'block';
+      document.getElementById('uf-step2').style.display = 'none';
+    } else {
+      const err = d.error || '';
+      // Clear face and force retake on any face-related failure
+      if (err.toLowerCase().includes('face') || err.toLowerCase().includes('match') || err.toLowerCase().includes('resemble')) {
+        ufFaceB64 = null;
+        document.getElementById('ufPreview').style.display = 'none';
+        document.getElementById('ufPrompt').style.display = 'block';
+        document.getElementById('ufBtn-retake').style.display = 'none';
+        document.getElementById('ufBtn-start').style.display = 'block';
+        document.getElementById('ufStatus').textContent = '';
+        document.getElementById('btnUpdateFace').disabled = true;
+        document.getElementById('btnUpdateFace').style.opacity = '.5';
+      }
+      showMsg(msgEl, err || 'Update failed. Please try again.', 'error');
+    }
+  } catch (e) {
+    showMsg(msgEl, 'Network error. Please try again.', 'error');
+  } finally {
+    setBtn('btnUpdateFace', false, 'Update Face');
+  }
+}
+
+/* ── history ─────────────────────────────────────────────────────────── */
+async function loadHistory() {
+  try {
+    const r = await fetch(`${API}/api/transfer-history?limit=50`, {
+      headers: { 'Authorization': `Bearer ${TOKEN()}` }
+    });
+    const d = await r.json();
+    if (d.success && d.transfers) {
+      const html = d.transfers.length
+        ? d.transfers.map(t => {
+            const isSent = t.direction === 'sent';
+            const other  = isSent ? (t.recipient || t.recipient_phone || '—') : (t.sender_phone || '—');
+            const statusColor = t.status === 'completed' ? 'var(--accent)'
+                              : t.status === 'blocked'   ? 'var(--danger)'
+                              : 'var(--warn)';
+            const fraudNote = t.is_fraud ? `<div style="font-size:.72rem;color:var(--danger);margin-top:2px;display:flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;flex-shrink:0"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg> ${t.notes || 'Fraud detected'}</div>` : '';
+            return `
+              <div style="padding:16px 24px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+                <div>
+                  <div style="font-weight:600">${isSent ? '→ ' + other : '← ' + other}</div>
+                  <div style="font-size:.75rem;color:var(--muted)">${fmtDate(t.created_at)}</div>
+                  <div style="font-size:.72rem;color:${statusColor};margin-top:2px">${(t.status || 'completed').toUpperCase()}</div>
+                  ${fraudNote}
+                </div>
+                <div style="text-align:right">
+                  <div style="font-weight:600;color:${isSent ? 'var(--danger)' : 'var(--accent)'}">
+                    ${isSent ? '-' : '+'}${fmtRWF(Math.abs(t.amount))}
+                  </div>
+                  <div style="font-size:.75rem;color:var(--muted)">Fee: ${fmtRWF(t.fee || 0)}</div>
+                </div>
+              </div>`;
+          }).join('')
+        : '<div class="empty-state">No transactions found</div>';
+      document.getElementById('historyList').innerHTML = html;
+    }
+  } catch (e) { console.error('History error:', e); }
+}
+ 
+/* ── profile ─────────────────────────────────────────────────────────── */
+function loadProfile() {
+  if (!currentUser) return;
+  document.getElementById('detailName').textContent       = currentUser.name       || '—';
+  document.getElementById('detailPhone').textContent      = currentUser.phone      || '—';
+  document.getElementById('detailEmail').textContent      = currentUser.email      || '—';
+  document.getElementById('detailNationalId').textContent = currentUser.national_id || currentUser.nationalId || '—';
+}
+ 
+
+/* ── face verification (fraud check modal) ───────────────────────────── */
+function _faceShowBtns(state) {
+  // state: 'start' | 'capture' | 'confirm'
+  document.getElementById('faceBtn-start').style.display   = state === 'start'   ? 'flex' : 'none';
+  document.getElementById('faceBtn-capture').style.display = state === 'capture' ? 'flex' : 'none';
+  document.getElementById('faceBtn-confirm').style.display = state === 'confirm' ? 'flex' : 'none';
+}
+
+function openFaceModal(msg) {
+  // Show only fraud detail in the subtitle — clean, no ugly FRAUD ALERT prefix
+  const clean = (msg || '').replace(/^\[FRAUD ALERT\]\s*/i, '');
+  document.getElementById('faceModalMsg').textContent = clean || 'Please verify your identity to proceed.';
+  document.getElementById('faceModal').style.display = 'flex';
+  capturedFaceB64 = null;
+  document.getElementById('faceVideo').style.display       = 'none';
+  document.getElementById('facePreviewImg').style.display  = 'none';
+  document.getElementById('faceCameraPlaceholder').style.display = 'block';
+  document.getElementById('faceStatus').textContent        = '';
+  _faceShowBtns('start');
+}
+
+function closeFaceModal() {
+  document.getElementById('faceModal').style.display = 'none';
+  stopFaceCamera();
+}
+
+async function startFaceCamera() {
+  try {
+    document.getElementById('faceStatus').textContent = 'Starting camera…';
+    faceStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false
+    });
+    const video = document.getElementById('faceVideo');
+    video.srcObject = faceStream;
+    video.style.display = 'block';
+    document.getElementById('faceCameraPlaceholder').style.display = 'none';
+    document.getElementById('facePreviewImg').style.display = 'none';
+    _faceShowBtns('capture');
+    document.getElementById('faceStatus').textContent = 'Centre your face fully in frame, then click Capture.';
+  } catch (err) {
+    document.getElementById('faceStatus').textContent = 'Camera error: ' + err.message;
+  }
+}
+
+function stopFaceCamera() {
+  if (faceStream) { faceStream.getTracks().forEach(t => t.stop()); faceStream = null; }
+}
+
+function captureFace() {
+  const video  = document.getElementById('faceVideo');
+  const canvas = document.getElementById('faceCanvas');
+  canvas.width  = video.videoWidth  || 1280;
+  canvas.height = video.videoHeight || 720;
+  const ctx = canvas.getContext('2d');
+  // Mirror to match display (scaleX(-1) on video)
+  ctx.translate(canvas.width, 0); ctx.scale(-1, 1);
+  ctx.drawImage(video, 0, 0);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  // Quality check — reject immediately, stay on camera, no transfer to confirm
+  const px = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  let bright = 0;
+  for (let i = 0; i < px.length; i += 4) bright += (px[i] + px[i+1] + px[i+2]) / 3;
+  const avg = bright / (px.length / 4);
+  if (avg < 25 || avg > 230) {
+    document.getElementById('faceStatus').textContent =
+      avg < 25
+        ? 'Image too dark — move to a brighter area and try again.'
+        : 'Image too bright — reduce glare or move away from direct light.';
+    return; // stay on capture state, user retries naturally
+  }
+
+  capturedFaceB64 = canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
+  stopFaceCamera();
+  document.getElementById('faceVideo').style.display      = 'none';
+  document.getElementById('facePreviewImg').src            = 'data:image/jpeg;base64,' + capturedFaceB64;
+  document.getElementById('facePreviewImg').style.display  = 'block';
+  document.getElementById('faceStatus').textContent        = 'Face captured. Click Confirm Transfer to verify.';
+  _faceShowBtns('confirm');
+}
+
+function retakeFace() {
+  capturedFaceB64 = null;
+  document.getElementById('facePreviewImg').style.display = 'none';
+  document.getElementById('faceStatus').textContent       = '';
+  startFaceCamera();
+}
+
+async function submitFaceVerification() {
+  if (!capturedFaceB64 || !pendingTransferData) return;
+  document.getElementById('faceStatus').textContent = 'Verifying identity…';
+  document.getElementById('btnSubmitFace').disabled = true;
+
+  try {
+    const r = await fetch(`${API}/api/transfer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${TOKEN()}` },
+      body: JSON.stringify({
+        recipient_phone: pendingTransferData.recipientPhone,
+        amount:          pendingTransferData.amount,
+        transfer_type:   'mobile_money',
+        face_base64:     capturedFaceB64
+      })
+    });
+    const d = await r.json();
+
+    if (d.success) {
+      closeFaceModal();
+      pendingTransferData = null;
+      showMsg('transferMsg',
+        `Identity verified! Transfer of ${fmtRWF(d.amount)} sent. Ref: ${d.reference || '—'}`,
+        'success');
+      document.getElementById('recipientPhone').value = '';
+      document.getElementById('transferAmount').value = '';
+      document.getElementById('recipientPreview').classList.remove('show');
+      document.getElementById('feePreview').classList.remove('show');
+      recipientName = null;
+      await refreshBalance();
+    } else if (d.action === 'BLOCK' || d.face_failed) {
+      // Face mismatch — stay in modal, force retake
+      capturedFaceB64 = null;
+      document.getElementById('facePreviewImg').style.display = 'none';
+      document.getElementById('faceCameraPlaceholder').style.display = 'block';
+      document.getElementById('faceStatus').textContent =
+        'Face does not match your registered face. Please retake a clearer photo facing the camera.';
+      document.getElementById('btnSubmitFace').disabled = false;
+      _faceShowBtns('start');
+    } else {
+      closeFaceModal();
+      showMsg('transferMsg', d.error || 'Verification failed. Please try again.', 'error');
+    }
+  } catch (e) {
+    closeFaceModal();
+    showMsg('transferMsg', 'Network error during verification. Please try again.', 'error');
+  }
+}
+
+/* ── start ───────────────────────────────────────────────────────────── */
+window.addEventListener('load', init);
+</script>
+</body>
+</html>
