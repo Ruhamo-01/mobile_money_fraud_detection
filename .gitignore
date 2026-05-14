@@ -1,0 +1,6 @@
+Fraud.csv
+__pycache__/
+*.pyc
+*.pkl
+*.db
+uploads/
