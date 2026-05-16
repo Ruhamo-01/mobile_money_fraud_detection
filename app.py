@@ -1702,10 +1702,12 @@ def admin_system_stats():
 @app.route("/api/health", methods=["GET"])
 def health():
     return _ok({
-        "status"   : "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "version"  : "2.0.0",
-        "ml_model" : fraud_detector.config.get("best_model", "not loaded"),
+        "status"    : "healthy",
+        "timestamp" : datetime.now().isoformat(),
+        "version"   : "2.0.0",
+        "ml_model"  : fraud_detector.config.get("best_model", "not loaded"),
+        "threshold" : fraud_detector.config.get("threshold", "—"),
+        "fraud_f1"  : fraud_detector.config.get("fraud_f1", "—"),
     })
 
 

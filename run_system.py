@@ -108,11 +108,7 @@ MODEL_FILES = [
     "fraud_config.json",
 ]
 
-TEMPLATE_FILES = [
-    ("templates/index.html",     "index.html"),
-    ("templates/login.html",     "login.html"),
-    ("templates/dashboard.html", "dashboard.html"),
-]
+TEMPLATE_FILES = []  # React frontend served by Vite — no HTML templates needed
 
 def check_files() -> bool:
     print("\n  Checking core Python files…")
@@ -145,18 +141,8 @@ def check_files() -> bool:
         except Exception as e:
             warn(f"Could not read fraud_config.json: {e}")
 
-    print("\n  Checking HTML templates…")
-    for dest, src in TEMPLATE_FILES:
-        if os.path.exists(dest):
-            ok(dest)
-        elif os.path.exists(src):
-            # Auto-move to templates/
-            os.makedirs("templates", exist_ok=True)
-            import shutil
-            shutil.copy(src, dest)
-            ok(f"{dest}  (copied from {src})")
-        else:
-            warn(f"{dest}  not found — page will return 404")
+    info("Frontend: React SPA served by Vite on http://localhost:5173")
+    info("Backend:  Flask API served on http://localhost:5000")
 
     return all_ok
 
@@ -166,23 +152,21 @@ def check_files() -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def check_database() -> bool:
-    db = "mobile_money_users.db"
-    print("\n  Checking database…")
-    if os.path.exists(db):
-        size = os.path.getsize(db)
-        ok(f"{db}  ({size:,} bytes)")
-        try:
-            import sqlite3
-            conn = sqlite3.connect(db)
-            c    = conn.cursor()
-            c.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            tables = [r[0] for r in c.fetchall()]
-            conn.close()
-            ok(f"Tables: {', '.join(tables) if tables else 'none yet'}")
-        except Exception as e:
-            warn(f"Could not inspect DB: {e}")
-    else:
-        info(f"{db} will be created automatically on first run")
+    print("\n  Checking PostgreSQL connection…")
+    try:
+        import psycopg2
+        conn = psycopg2.connect(
+            dbname='momo_fraud', user='postgres',
+            password='Eric@!99', host='localhost', port='5432'
+        )
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM users")
+        count = c.fetchone()[0]
+        conn.close()
+        ok(f"PostgreSQL connected — {count} users in DB")
+    except Exception as e:
+        err(f"PostgreSQL connection failed: {e}")
+        return False
     return True
 
 
@@ -253,7 +237,7 @@ def open_browser():
     """Open browser after 3-second delay so Flask has time to bind."""
     time.sleep(3)
     try:
-        webbrowser.open("http://localhost:5000")
+        webbrowser.open("http://localhost:5173")
         ok("Browser opened automatically")
     except Exception:
         info("Open http://localhost:5000 in your browser manually")
@@ -264,8 +248,8 @@ def start_server():
     sep()
     info("URL        : http://localhost:5000")
     info("Health     : http://localhost:5000/api/health")
-    info("Dashboard  : http://localhost:5000/dashboard")
-    info("Login      : http://localhost:5000/login")
+    info("Frontend   : http://localhost:5173  (run: npm run dev)")
+    info("Login      : http://localhost:5173/login")
     sep()
     info("Press Ctrl+C to stop")
     sep()
@@ -378,7 +362,7 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\n\n  Server stopped.")
-        print("  Data saved in mobile_money_users.db")
+        print("  Data saved in PostgreSQL (momo_fraud database)")
         print("  Run again with:  python run_system.py")
         print()
     except Exception as e:

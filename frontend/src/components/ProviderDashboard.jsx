@@ -137,10 +137,18 @@ export default function ProviderDashboard() {
   
   const loadStats = async () => {
     try {
-      const r = await fetch(`${API}/api/dashboard/stats`);
-      const d = await r.json();
-      if (d.success) {
-        setStats(d.stats);
+      const [statsRes, healthRes] = await Promise.all([
+        fetch(`${API}/api/dashboard/stats`),
+        fetch(`${API}/api/health`)
+      ]);
+      const statsData = await statsRes.json();
+      const healthData = await healthRes.json();
+      if (statsData.success) {
+        setStats({
+          ...statsData.stats,
+          ml_model: healthData.ml_model || 'Unknown',
+          threshold: healthData.threshold || '—'
+        });
       }
     } catch (e) {
       console.error('Stats error:', e);
@@ -503,11 +511,11 @@ export default function ProviderDashboard() {
                 <div className="p-6">
                   <div className="flex justify-between py-3 border-b border-slate-200">
                     <span className="text-xs text-slate-500">Model</span>
-                    <span className="text-xs font-semibold font-mono">Loading…</span>
+                    <span className="text-xs font-semibold font-mono">{stats.ml_model || 'Loading…'}</span>
                   </div>
                   <div className="flex justify-between py-3 border-b border-slate-200">
                     <span className="text-xs text-slate-500">Threshold</span>
-                    <span className="text-xs font-semibold font-mono">0.31</span>
+                    <span className="text-xs font-semibold font-mono">{stats.threshold || '—'}</span>
                   </div>
                   <div className="flex justify-between py-3">
                     <span className="text-xs text-slate-500">Status</span>
