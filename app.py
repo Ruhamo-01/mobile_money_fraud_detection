@@ -54,7 +54,7 @@ import uuid as uuid_lib
 from datetime import datetime
 import time
 
-from flask import Flask, request, jsonify, render_template, redirect
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 from auth_system import AuthenticationSystem
@@ -196,25 +196,7 @@ def _ensure_pin_columns():
 
 @app.route("/")
 def index():
-    return redirect("/login")
-
-@app.route("/login")
-def login_page():
-    return render_template("login.html")
-
-@app.route("/user_dashboard")
-def user_dashboard_page():
-    return render_template("user_dashboard.html")
-
-@app.route("/provider_dashboard")
-def provider_dashboard_page():
-    return render_template("provider_dashboard.html")
-
-@app.route("/admin_dashboard")
-def admin_dashboard_page():
-    # For now, skip server-side auth check and let client handle it
-    # This prevents redirect loops while debugging
-    return render_template("admin_dashboard.html")
+    return _ok({"message": "MoMo Shield API v2.0 — use /api/* endpoints"})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -548,7 +530,7 @@ def update_face():
                         "Face does not match registered face — update rejected"
                     )
                     return _err(
-                        "⚠️ Face verification failed — your face does not match the registered face on this account.\n\n"
+                        " Face verification failed — your face does not match the registered face on this account.\n\n"
                         "Possible reasons:\n"
                         "• You are not the registered owner of this account\n"
                         "• Poor lighting — move to a brighter area and try again\n"
