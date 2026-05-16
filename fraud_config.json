@@ -1,12 +1,12 @@
 {
   "best_model": "XGBoost",
-  "threshold": 0.65,
+  "threshold": 0.38,
   "features": [
     "log_amount",
-    "log_old_orig",
-    "log_new_orig",
-    "log_old_dest",
-    "log_new_dest",
+    "log_oldbalanceOrg",
+    "log_newbalanceOrig",
+    "log_oldbalanceDest",
+    "log_newbalanceDest",
     "orig_balance_drop",
     "dest_balance_gain",
     "balance_mismatch",
@@ -16,24 +16,28 @@
     "type_encoded",
     "hour_of_day",
     "is_high_amount",
+    "amount_vs_typical",
+    "is_amount_spike",
+    "pin_near_lockout",
     "amount_exceeds_balance",
-    "excess_ratio",
-    "rapid_tx_count"
+    "hard_block_signal",
+    "excess_ratio"
   ],
-  "n_features": 17,
-  "fraud_f1": 0.9963,
-  "roc_auc": 1.0,
+  "n_features": 20,
+  "fraud_f1": 0.7223,
+  "roc_auc": 0.9728,
   "fraud_logic": {
-    "amount_exceeds_balance": "ALWAYS BLOCK immediately in money_transfer.py before ML \u2014 impossible transaction, no face needed",
+    "rule1_amount_spike": "If amount > 5x user's typical daily range \u2192 require face verification",
+    "rule2_pin_failures": "If pin_fail_count >= 2 (on 3rd attempt) \u2192 require face verification",
+    "rule3_balance_abuse": "If amount > balance AND balance_abuse_count >= 3 \u2192 HARD BLOCK, no face needed",
+    "rule3_single_exceed": "If amount > balance (first/second time) \u2192 block immediately (impossible tx)",
     "face_verify_triggers": [
-      "velocity_burst (rapid_tx_count>=3)",
-      "amount_spike (large unusual jump within balance)",
-      "near_drain (95-100% of balance, unusual)"
+      "is_amount_spike=1",
+      "pin_near_lockout=1"
     ],
-    "block_no_face": [
-      "amount > balance",
-      "user abroad",
-      "account inactive"
+    "hard_block_no_face": [
+      "hard_block_signal=1",
+      "amount > balance"
     ]
   }
 }

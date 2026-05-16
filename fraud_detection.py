@@ -10,7 +10,8 @@ Classes:
   - FraudAlertSystem         : notify service provider when fraud suspected
 """
 
-import sqlite3
+import psycopg2
+import psycopg2.extras
 import numpy as np
 import pandas as pd
 import joblib
@@ -24,19 +25,23 @@ from datetime import datetime, timedelta
 # 1. USER REGISTRATION SYSTEM  (phone ↔ name ↔ face mapping)
 # ─────────────────────────────────────────────────────────────────────────────
 class UserRegistrationSystem:
-    def __init__(self, db_path="mobile_money_users.db"):
-        self.db_path = db_path
+    def __init__(self, db_config):
+        self.db_config = db_config
         self.init_database()
+    
+    def get_connection(self):
+        """Create and return a PostgreSQL database connection."""
+        return psycopg2.connect(**self.db_config)
 
     def init_database(self):
         """Create all required tables if they do not exist."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
 
         # Main users table — phone ↔ name ↔ face mapping
         c.execute('''
             CREATE TABLE IF NOT EXISTS users (
-                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                id                  SERIAL PRIMARY KEY,
                 phone_number        TEXT    UNIQUE NOT NULL,
                 full_name           TEXT    NOT NULL,
                 national_id         TEXT    UNIQUE NOT NULL,
@@ -45,8 +50,8 @@ class UserRegistrationSystem:
                 salt                TEXT    DEFAULT '',
                 gender              TEXT    DEFAULT '',
                 registration_date   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                is_active           BOOLEAN DEFAULT 1,
-                face_encoding       BLOB,
+                is_active           BOOLEAN DEFAULT TRUE,
+                face_encoding       BYTEA,
                 face_image_path     TEXT,
                 verification_status TEXT    DEFAULT 'pending',
                 account_balance     REAL    DEFAULT 0.0,
@@ -57,12 +62,12 @@ class UserRegistrationSystem:
         # Travel monitoring
         c.execute('''
             CREATE TABLE IF NOT EXISTS travel_records (
-                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                id                  SERIAL PRIMARY KEY,
                 user_phone          TEXT,
                 departure_date      TIMESTAMP,
                 return_date         TIMESTAMP,
                 destination_country TEXT,
-                sim_deactivated     BOOLEAN DEFAULT 0,
+                sim_deactivated     BOOLEAN DEFAULT FALSE,
                 FOREIGN KEY (user_phone) REFERENCES users (phone_number)
             )
         ''')
@@ -70,13 +75,13 @@ class UserRegistrationSystem:
         # Transaction history for pattern analysis
         c.execute('''
             CREATE TABLE IF NOT EXISTS transaction_history (
-                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                id               SERIAL PRIMARY KEY,
                 user_phone       TEXT,
                 amount           REAL,
                 transaction_type TEXT,
                 timestamp        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 recipient_phone  TEXT,
-                is_fraud         BOOLEAN DEFAULT 0,
+                is_fraud         BOOLEAN DEFAULT FALSE,
                 fraud_score      REAL,
                 FOREIGN KEY (user_phone) REFERENCES users (phone_number)
             )
@@ -85,10 +90,10 @@ class UserRegistrationSystem:
         # PIN attempt monitoring
         c.execute('''
             CREATE TABLE IF NOT EXISTS pin_attempts (
-                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                id             SERIAL PRIMARY KEY,
                 user_phone     TEXT,
                 attempt_time   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                was_successful BOOLEAN DEFAULT 0,
+                was_successful BOOLEAN DEFAULT FALSE,
                 ip_address     TEXT,
                 device_id      TEXT,
                 FOREIGN KEY (user_phone) REFERENCES users (phone_number)
@@ -98,7 +103,7 @@ class UserRegistrationSystem:
         # Pending deposits table
         c.execute('''
             CREATE TABLE IF NOT EXISTS pending_deposits (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                id         SERIAL PRIMARY KEY,
                 user_id    INTEGER,
                 amount     REAL,
                 reference  TEXT,
@@ -110,11 +115,12 @@ class UserRegistrationSystem:
 
         # Safe migration: add gender column if missing
         try:
-            c.execute("ALTER TABLE users ADD COLUMN gender TEXT DEFAULT ''")
+            c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT DEFAULT ''")
         except Exception:
             pass
 
         conn.commit()
+        c.close()
         conn.close()
 
     # ── Face encoding helpers ─────────────────────────────────────────────
@@ -458,9 +464,9 @@ class UserRegistrationSystem:
         Returns {"verified": bool, "distance_db": float, "distance_file": float, ...}
         """
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self.get_connection()
             c = conn.cursor()
-            c.execute("SELECT face_encoding, face_image_path FROM users WHERE phone_number = ?",
+            c.execute("SELECT face_encoding, face_image_path FROM users WHERE phone_number = %s",
                       (phone_number,))
             row = c.fetchone()
             conn.close()
@@ -592,7 +598,7 @@ class UserRegistrationSystem:
         if face_base64:
             face_encoding = self.extract_face_encoding_from_base64(face_base64)
 
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
         try:
             c.execute('''
@@ -600,7 +606,7 @@ class UserRegistrationSystem:
                 (phone_number, full_name, national_id, email,
                  password_hash, salt, gender,
                  face_encoding, verification_status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ''', (phone_number, full_name, national_id, email,
                   password_hash, salt, gender,
                   face_encoding,
@@ -609,7 +615,7 @@ class UserRegistrationSystem:
             return {"success": True,
                     "message": "Account created successfully",
                     "face_registered": face_encoding is not None}
-        except sqlite3.IntegrityError:
+        except psycopg2.IntegrityError:
             return {"success": False,
                     "error": "User with this phone, email, or ID already exists"}
         finally:
@@ -629,10 +635,13 @@ class UserRegistrationSystem:
         # First get existing face_image_path so we can delete it
         existing_path = None
         if overwrite:
-            conn = sqlite3.connect(self.db_path)
-            row = conn.execute(
-                "SELECT face_image_path FROM users WHERE phone_number=?", (phone_number,)
-            ).fetchone()
+            conn = self.get_connection()
+            c = conn.cursor()
+            c.execute(
+                "SELECT face_image_path FROM users WHERE phone_number=%s", (phone_number,)
+            )
+            row = c.fetchone()
+            c.close()
             conn.close()
             if row and row[0]:
                 existing_path = row[0]
@@ -653,12 +662,12 @@ class UserRegistrationSystem:
                 print(f"[UpdateFace] Could not delete old file: {e}")
 
         new_path = face_result.get("image_path")
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
         c.execute('''
             UPDATE users
-            SET face_encoding = ?, face_image_path = ?, verification_status = 'verified'
-            WHERE phone_number = ?
+            SET face_encoding = %s, face_image_path = %s, verification_status = 'verified'
+            WHERE phone_number = %s
         ''', (face_result["encoding"], new_path, phone_number))
         conn.commit()
         conn.close()
@@ -670,13 +679,13 @@ class UserRegistrationSystem:
         }
 
     def get_user_info(self, phone_number: str) -> dict | None:
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
         c.execute('''
             SELECT phone_number, full_name, national_id, email,
                    registration_date, is_active, verification_status,
                    account_balance, gender
-            FROM users WHERE phone_number = ?
+            FROM users WHERE phone_number = %s
         ''', (phone_number,))
         row = c.fetchone()
         conn.close()
@@ -695,9 +704,9 @@ class UserRegistrationSystem:
         }
 
     def has_face_registered(self, phone_number: str) -> bool:
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
-        c.execute("SELECT face_encoding FROM users WHERE phone_number = ?",
+        c.execute("SELECT face_encoding FROM users WHERE phone_number = %s",
                   (phone_number,))
         row = c.fetchone()
         conn.close()
@@ -714,8 +723,12 @@ class TravelMonitoringSystem:
         self.user_system = user_system
 
     @property
-    def db_path(self):
-        return self.user_system.db_path
+    def db_config(self):
+        return self.user_system.db_config
+    
+    def get_connection(self):
+        """Create and return a PostgreSQL database connection."""
+        return psycopg2.connect(**self.db_config)
 
     def register_travel(self, phone_number: str, departure_date: str,
                         return_date: str, destination_country: str) -> dict:
@@ -724,13 +737,13 @@ class TravelMonitoringSystem:
         Money transfers are immediately blocked.
         FIX: Block duplicate registrations.
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
         try:
             # Block duplicate: reject if already has an active (sim_deactivated=1) record
             c.execute('''
                 SELECT id, destination_country, return_date FROM travel_records
-                WHERE user_phone = ? AND sim_deactivated = 1
+                WHERE user_phone = %s AND sim_deactivated = TRUE
                 ORDER BY id DESC LIMIT 1
             ''', (phone_number,))
             existing = c.fetchone()
@@ -744,9 +757,9 @@ class TravelMonitoringSystem:
             c.execute('''
                 INSERT INTO travel_records
                 (user_phone, departure_date, return_date, destination_country, sim_deactivated)
-                VALUES (?, ?, ?, ?, 1)
+                VALUES (%s, %s, %s, %s, TRUE)
             ''', (phone_number, departure_date, return_date, destination_country))
-            c.execute("UPDATE users SET is_active = 0 WHERE phone_number = ?",
+            c.execute("UPDATE users SET is_active = FALSE WHERE phone_number = %s",
                       (phone_number,))
             conn.commit()
             return {
@@ -765,13 +778,13 @@ class TravelMonitoringSystem:
         FIX: Find the latest record regardless of date, mark sim_deactivated=0,
         set return_date to yesterday so is_user_abroad() returns False immediately.
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
         try:
             # Get the latest travel record for this phone
             c.execute('''
                 SELECT id FROM travel_records
-                WHERE user_phone = ?
+                WHERE user_phone = %s
                 ORDER BY id DESC LIMIT 1
             ''', (phone_number,))
             row = c.fetchone()
@@ -780,10 +793,10 @@ class TravelMonitoringSystem:
                 yesterday = (datetime.now() - __import__('datetime').timedelta(days=1)).strftime('%Y-%m-%d')
                 c.execute('''
                     UPDATE travel_records
-                    SET sim_deactivated = 0, return_date = ?
-                    WHERE id = ?
+                    SET sim_deactivated = FALSE, return_date = %s
+                    WHERE id = %s
                 ''', (yesterday, row[0]))
-                c.execute("UPDATE users SET is_active = 1 WHERE phone_number = ?",
+                c.execute("UPDATE users SET is_active = TRUE WHERE phone_number = %s",
                           (phone_number,))
                 conn.commit()
                 return {"success": True,
@@ -799,15 +812,15 @@ class TravelMonitoringSystem:
         """Return True only if travel record is active AND sim is still deactivated.
         FIX: Use date() comparison and also check sim_deactivated=1.
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
         today = datetime.now().strftime('%Y-%m-%d')
         c.execute('''
             SELECT id FROM travel_records
-            WHERE user_phone = ?
-              AND date(departure_date) <= date(?)
-              AND date(return_date)    >= date(?)
-              AND sim_deactivated = 1
+            WHERE user_phone = %s
+              AND date(departure_date) <= date(%s)
+              AND date(return_date)    >= date(%s)
+              AND sim_deactivated = TRUE
         ''', (phone_number, today, today))
         row = c.fetchone()
         conn.close()
@@ -815,13 +828,13 @@ class TravelMonitoringSystem:
 
     def get_travel_status(self, phone_number: str) -> dict:
         """FIX: Return is_abroad key (frontend expects this), query only active records."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
         # Only get records where sim is still deactivated (not yet reactivated)
         c.execute('''
             SELECT departure_date, return_date, destination_country, sim_deactivated
             FROM travel_records
-            WHERE user_phone = ? AND sim_deactivated = 1
+            WHERE user_phone = %s AND sim_deactivated = TRUE
             ORDER BY id DESC LIMIT 1
         ''', (phone_number,))
         row = c.fetchone()
@@ -852,19 +865,23 @@ class TransactionAnomalyDetector:
         self.user_system = user_system
 
     @property
-    def db_path(self):
-        return self.user_system.db_path
+    def db_config(self):
+        return self.user_system.db_config
+    
+    def get_connection(self):
+        """Create and return a PostgreSQL database connection."""
+        return psycopg2.connect(**self.db_config)
 
     def record_transaction(self, phone_number: str, amount: float,
                            transaction_type: str,
                            recipient_phone: str = None) -> dict:
         """Record transaction and return rule-based anomaly score."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
         try:
             c.execute('''
                 SELECT amount, timestamp FROM transaction_history
-                WHERE user_phone = ?
+                WHERE user_phone = %s
                 ORDER BY timestamp DESC LIMIT 50
             ''', (phone_number,))
             history = c.fetchall()
@@ -875,7 +892,7 @@ class TransactionAnomalyDetector:
             c.execute('''
                 INSERT INTO transaction_history
                 (user_phone, amount, transaction_type, recipient_phone, fraud_score)
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s)
             ''', (phone_number, amount, transaction_type, recipient_phone, score))
             conn.commit()
 
@@ -921,15 +938,15 @@ class TransactionAnomalyDetector:
         return score
 
     def get_user_transaction_pattern(self, phone_number: str, days: int = 30) -> dict | None:
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
-        c.execute(f'''
+        c.execute('''
             SELECT amount, transaction_type, timestamp
             FROM transaction_history
-            WHERE user_phone = ?
-              AND timestamp >= datetime('now', '-{days} days')
+            WHERE user_phone = %s
+              AND timestamp >= NOW() - INTERVAL '1 day' * %s
             ORDER BY timestamp
-        ''', (phone_number,))
+        ''', (phone_number, days))
         rows = c.fetchall()
         conn.close()
         if not rows:
@@ -953,17 +970,21 @@ class PinMonitoringSystem:
         self.user_system = user_system
 
     @property
-    def db_path(self):
-        return self.user_system.db_path
+    def db_config(self):
+        return self.user_system.db_config
+    
+    def get_connection(self):
+        """Create and return a PostgreSQL database connection."""
+        return psycopg2.connect(**self.db_config)
 
     def record_pin_attempt(self, phone_number: str, was_successful: bool,
                            ip_address: str = None, device_id: str = None) -> dict:
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
         try:
             c.execute('''
                 INSERT INTO pin_attempts (user_phone, was_successful, ip_address, device_id)
-                VALUES (?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s)
             ''', (phone_number, was_successful, ip_address, device_id))
             suspicious = self._check_suspicious(phone_number, c)
             conn.commit()
@@ -976,15 +997,15 @@ class PinMonitoringSystem:
     def _check_suspicious(self, phone_number: str, cursor) -> dict:
         cursor.execute('''
             SELECT COUNT(*) FROM pin_attempts
-            WHERE user_phone = ? AND was_successful = 0
-              AND attempt_time >= datetime('now', '-5 minutes')
+            WHERE user_phone = %s AND was_successful = FALSE
+              AND attempt_time >= NOW() - INTERVAL '5 minutes'
         ''', (phone_number,))
         recent_fail = cursor.fetchone()[0]
 
         cursor.execute('''
             SELECT COUNT(*) FROM pin_attempts
-            WHERE user_phone = ? AND was_successful = 0
-              AND attempt_time >= datetime('now', '-1 hour')
+            WHERE user_phone = %s AND was_successful = FALSE
+              AND attempt_time >= NOW() - INTERVAL '1 hour'
         ''', (phone_number,))
         hour_fail = cursor.fetchone()[0]
 
@@ -998,12 +1019,12 @@ class PinMonitoringSystem:
                 "message": "Normal PIN activity."}
 
     def get_pin_security_status(self, phone_number: str) -> dict:
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
         c.execute('''
             SELECT was_successful, attempt_time
             FROM pin_attempts
-            WHERE user_phone = ?
+            WHERE user_phone = %s
             ORDER BY attempt_time DESC LIMIT 10
         ''', (phone_number,))
         rows = c.fetchall()
@@ -1035,27 +1056,32 @@ class FraudAlertSystem:
     the API response so the dashboard can display them.
     """
 
-    def __init__(self, db_path: str = "mobile_money_users.db"):
-        self.db_path = db_path
+    def __init__(self, db_config):
+        self.db_config = db_config
         self._ensure_table()
+    
+    def get_connection(self):
+        """Create and return a PostgreSQL database connection."""
+        return psycopg2.connect(**self.db_config)
 
     def _ensure_table(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
         c.execute('''
             CREATE TABLE IF NOT EXISTS fraud_alerts (
-                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                id             SERIAL PRIMARY KEY,
                 phone_number   TEXT,
                 amount         REAL,
                 fraud_score    REAL,
                 risk_level     TEXT,
                 action         TEXT,
                 alert_message  TEXT,
-                created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                acknowledged   BOOLEAN DEFAULT 0
+                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                acknowledged   BOOLEAN DEFAULT FALSE
             )
         ''')
         conn.commit()
+        c.close()
         conn.close()
 
     def raise_alert(self, phone_number: str, amount: float,
@@ -1067,30 +1093,33 @@ class FraudAlertSystem:
             f"Amount: {amount:,.0f} RWF | Score: {fraud_score:.3f} | "
             f"Risk: {risk_level} | Action: {action}. {extra_info}"
         )
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
         c.execute('''
             INSERT INTO fraud_alerts
             (phone_number, amount, fraud_score, risk_level, action, alert_message)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id
         ''', (phone_number, amount, fraud_score, risk_level, action, msg))
-        alert_id = c.lastrowid
+        alert_id = c.fetchone()[0]
         conn.commit()
+        c.close()
         conn.close()
 
-        print(f"\n🚨 {msg}\n")   # Also log to console / server logs
+        print(f"\n🚨 {msg}\n")
         return {"alert_id": alert_id, "message": msg, "timestamp": datetime.now().isoformat()}
 
     def get_unacknowledged_alerts(self) -> list:
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
         c.execute('''
             SELECT id, phone_number, amount, fraud_score, risk_level,
                    action, alert_message, created_at
-            FROM fraud_alerts WHERE acknowledged = 0
+            FROM fraud_alerts WHERE acknowledged = FALSE
             ORDER BY created_at DESC
         ''')
         rows = c.fetchall()
+        c.close()
         conn.close()
         return [
             {"id": r[0], "phone": r[1], "amount": r[2], "fraud_score": r[3],
@@ -1099,19 +1128,20 @@ class FraudAlertSystem:
         ]
 
     def acknowledge_alert(self, alert_id: int) -> dict:
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
-        c.execute("UPDATE fraud_alerts SET acknowledged = 1 WHERE id = ?", (alert_id,))
+        c.execute("UPDATE fraud_alerts SET acknowledged = TRUE WHERE id = %s", (alert_id,))
         conn.commit()
+        c.close()
         conn.close()
         return {"success": True, "alert_id": alert_id}
 
     def update_alert(self, alert_id: int, new_action: str, extra_info: str) -> dict:
         """Update an existing alert's action and message (e.g. REQUIRE_FACE → BLOCK after face fail)."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
         # Get existing message and update it
-        c.execute("SELECT alert_message, phone_number, amount, fraud_score, risk_level FROM fraud_alerts WHERE id=?",
+        c.execute("SELECT alert_message, phone_number, amount, fraud_score, risk_level FROM fraud_alerts WHERE id=%s",
                   (alert_id,))
         row = c.fetchone()
         if row:
@@ -1122,7 +1152,7 @@ class FraudAlertSystem:
             if extra_info and extra_info not in new_msg:
                 new_msg = new_msg.rstrip('. ') + f". {extra_info}"
             c.execute(
-                "UPDATE fraud_alerts SET action=?, alert_message=?, risk_level='HIGH' WHERE id=?",
+                "UPDATE fraud_alerts SET action=%s, alert_message=%s, risk_level='HIGH' WHERE id=%s",
                 (new_action, new_msg, alert_id)
             )
         conn.commit()
@@ -1131,34 +1161,32 @@ class FraudAlertSystem:
 
 
 def _build_fraud_reason(phone_number: str, amount: float, ml_score: float,
-                         db_path: str) -> str:
+                         db_config: dict) -> str:
     """
-    Build a clear, human-readable explanation of why a transaction was flagged.
     Used in fraud_alerts.alert_message so admin can understand what happened.
     """
     try:
-        import sqlite3 as _sq
-        conn = _sq.connect(db_path)
+        conn = psycopg2.connect(**db_config)
         c = conn.cursor()
 
         # Get sender balance
-        c.execute("SELECT account_balance FROM users WHERE phone_number=?", (phone_number,))
+        c.execute("SELECT account_balance FROM users WHERE phone_number=%s", (phone_number,))
         row = c.fetchone()
         balance = row[0] if row else 0.0
 
         # Rapid transfers in last 60 seconds
         c.execute("""
             SELECT COUNT(*) FROM transaction_history
-            WHERE user_phone = ?
-              AND timestamp >= datetime('now', '-60 seconds')
+            WHERE user_phone = %s
+              AND timestamp >= NOW() - INTERVAL '60 seconds'
         """, (phone_number,))
         rapid = c.fetchone()[0] or 0
 
         # Rapid transfers in last 5 minutes
         c.execute("""
             SELECT COUNT(*) FROM transaction_history
-            WHERE user_phone = ?
-              AND timestamp >= datetime('now', '-5 minutes')
+            WHERE user_phone = %s
+              AND timestamp >= NOW() - INTERVAL '5 minutes'
         """, (phone_number,))
         rapid_5m = c.fetchone()[0] or 0
         conn.close()
@@ -1209,27 +1237,25 @@ class RealTimeFraudDetector:
     NOT used in the fraud decision. The ML model is the sole judge.
     TransactionAnomalyDetector.record_transaction() is still called to LOG
     the transaction to transaction_history (needed for ML feature building),
-    but its anomaly_score does NOT influence the fraud decision.
+    but its anomaly_score does NOT influence the fraud decision — the ML model is the sole judge.
     """
 
     # Risk thresholds (combined score 0–1)
     HIGH_RISK_THRESHOLD   = 0.65
     MEDIUM_RISK_THRESHOLD = 0.40
 
-    def __init__(self, db_path: str = "mobile_money_users.db"):
-        self.db_path        = db_path
-        self.user_system    = UserRegistrationSystem(db_path)
-        self.travel_system  = TravelMonitoringSystem(self.user_system)
-        self.anomaly_det    = TransactionAnomalyDetector(self.user_system)
-        self.pin_monitor    = PinMonitoringSystem(self.user_system)
-        self.alert_system   = FraudAlertSystem(db_path)
-
-        # Load trained ML model (produced by Momo_Clean.ipynb Phase 14)
-        self.model     = None
-        self.scaler    = None
-        self.config    = {}
-        self.threshold = 0.5
+    def __init__(self, db_config):
+        self.db_config = db_config
+        self.user_reg = UserRegistrationSystem(db_config)
+        self.travel_sys = TravelMonitoringSystem(self.user_reg)
+        self.anomaly_det = TransactionAnomalyDetector(self.user_reg)
+        self.pin_monitor = PinMonitoringSystem(self.user_reg)
+        self.alert_sys = FraudAlertSystem(db_config)
         self._load_ml_model()
+    
+    def get_connection(self):
+        """Create and return a PostgreSQL database connection."""
+        return psycopg2.connect(**self.db_config)
 
     def _load_ml_model(self):
         try:
@@ -1255,9 +1281,9 @@ class RealTimeFraudDetector:
         Uses live balance from DB + transaction history.
         """
         # Get live balance
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
-        c.execute("SELECT account_balance FROM users WHERE phone_number = ?",
+        c.execute("SELECT account_balance FROM users WHERE phone_number = %s",
                   (phone_number,))
         row = c.fetchone()
         conn.close()
@@ -1294,14 +1320,15 @@ class RealTimeFraudDetector:
         excess_ratio           = min(amount / (old_balance + 1), 10)
 
         # Rapid transfer count: how many transfers in last 60 seconds
-        conn2 = sqlite3.connect(self.db_path)
+        conn2 = self.get_connection()
         c2    = conn2.cursor()
         c2.execute("""
             SELECT COUNT(*) FROM transaction_history
-            WHERE user_phone = ?
-              AND timestamp >= datetime('now', '-60 seconds')
+            WHERE user_phone = %s
+              AND timestamp >= NOW() - INTERVAL '60 seconds'
         """, (phone_number,))
         rapid_tx_count = c2.fetchone()[0]
+        c2.close()
         conn2.close()
 
         return [
@@ -1366,8 +1393,8 @@ class RealTimeFraudDetector:
             "checks"       : checks,
         }
 
-        # ── 1. User active? ───────────────────────────────────────────────
-        user = self.user_system.get_user_info(phone_number)
+        # ── 1. User active%s ───────────────────────────────────────────────
+        user = self.user_reg.get_user_info(phone_number)
         if not user:
             checks["user"] = {"passed": False, "msg": "User not found"}
             result.update({"action": "BLOCK", "risk_level": "HIGH",
@@ -1387,14 +1414,14 @@ class RealTimeFraudDetector:
         checks["balance_multiplier"] = {"passed": True, "msg": "Delegated to ML model"}
 
         # ── 3. Travel check ───────────────────────────────────────────────
-        if self.travel_system.is_user_abroad(phone_number):
+        if self.travel_sys.is_user_abroad(phone_number):
             checks["travel"] = {"passed": False,
                                  "msg": "User is registered as abroad — transfers blocked."}
             result.update({"action": "BLOCK", "risk_level": "HIGH",
                            "message": "Transaction blocked: your SIM is deactivated for "
                                       "international travel. Please contact your service "
                                       "provider when you return."})
-            self.alert_system.raise_alert(
+            self.alert_sys.raise_alert(
                 phone_number, amount, 1.0, "HIGH", "BLOCK",
                 "Attempted transfer while registered abroad.")
             result["alert"] = True
@@ -1454,7 +1481,7 @@ class RealTimeFraudDetector:
         if result["risk_level"] in ("HIGH", "MEDIUM"):
             if face_base64:
                 # User has provided face image — verify it
-                face_result = self.user_system.verify_face_from_base64(
+                face_result = self.user_reg.verify_face_from_base64(
                     phone_number, face_base64)
                 result["face_verified"] = face_result.get("verified", False)
                 checks["face"] = face_result
@@ -1482,14 +1509,14 @@ class RealTimeFraudDetector:
                     # Close the pending REQUIRE_FACE alert and update it instead of creating a new one
                     pending_id = result.get("_alert_id")
                     if pending_id:
-                        self.alert_system.update_alert(pending_id, "BLOCK",
+                        self.alert_sys.update_alert(pending_id, "BLOCK",
                             "Face verification failed — identity could not be confirmed.")
                     else:
-                        _reason = _build_fraud_reason(phone_number, amount, ml_s, self.db_path)
-                        result["alert"] = self.alert_system.raise_alert(
+                        reason = _build_fraud_reason(phone_number, amount, ml_s, self.db_config)
+                        result["alert"] = self.alert_sys.raise_alert(
                             phone_number, amount, combined,
                             "HIGH", "BLOCK",
-                            f"{_reason}. Face verification failed — identity not confirmed.")
+                            f"{reason}. Face verification failed — identity not confirmed.")
                     result["face_failed"] = True
             else:
                 # No face provided yet — ask for it
@@ -1511,11 +1538,11 @@ class RealTimeFraudDetector:
                 result["message"] = face_msg
                 # Raise a service-provider alert immediately
                 # Build human-readable reason for admin
-                _reason = _build_fraud_reason(phone_number, amount, ml_s, self.db_path)
-                result["alert"] = self.alert_system.raise_alert(
+                reason = _build_fraud_reason(phone_number, amount, ml_s, self.db_config)
+                result["alert"] = self.alert_sys.raise_alert(
                     phone_number, amount, combined,
                     result["risk_level"], "REQUIRE_FACE",
-                    _reason)
+                    reason)
                 result["_alert_id"] = result["alert"].get("alert_id") if result["alert"] else None
         else:
             result["action"]  = "ALLOW"
@@ -1527,7 +1554,7 @@ class RealTimeFraudDetector:
 
     def get_fraud_alerts(self) -> list:
         """Return all unacknowledged alerts (for admin dashboard)."""
-        return self.alert_system.get_unacknowledged_alerts()
+        return self.alert_sys.get_unacknowledged_alerts()
 
     def acknowledge_alert(self, alert_id: int) -> dict:
-        return self.alert_system.acknowledge_alert(alert_id)
+        return self.alert_sys.acknowledge_alert(alert_id)

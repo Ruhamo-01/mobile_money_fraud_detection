@@ -15,7 +15,8 @@ Flow:
      with the image, resolves to ALLOW or BLOCK
 """
 
-import sqlite3
+import psycopg2
+import psycopg2.extras
 import re
 import random
 from datetime import datetime
@@ -24,24 +25,28 @@ from fraud_detection import RealTimeFraudDetector
 
 
 class MoneyTransferSystem:
-    def __init__(self, db_path="mobile_money_users.db"):
-        self.db_path    = db_path
-        self.auth       = AuthenticationSystem(db_path)
-        self.fraud_det  = RealTimeFraudDetector(db_path)
+    def __init__(self, db_config):
+        self.db_config  = db_config
+        self.auth       = AuthenticationSystem(db_config)
+        self.fraud_det  = RealTimeFraudDetector(db_config)
         self._init_tables()
         self._init_balance_attempt_table()
+    
+    def get_connection(self):
+        """Create and return a PostgreSQL database connection."""
+        return psycopg2.connect(**self.db_config)
 
     # ─────────────────────────────────────────────────────────────────────
     # DATABASE INIT
     # ─────────────────────────────────────────────────────────────────────
 
     def _init_tables(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
 
         c.execute('''
             CREATE TABLE IF NOT EXISTS money_transfers (
-                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                id               SERIAL PRIMARY KEY,
                 sender_id        INTEGER NOT NULL,
                 recipient_phone  TEXT    NOT NULL,
                 amount           REAL    NOT NULL,
@@ -54,8 +59,8 @@ class MoneyTransferSystem:
                 ml_score         REAL    DEFAULT 0.0,
                 rule_score       REAL    DEFAULT 0.0,
                 risk_level       TEXT    DEFAULT 'LOW',
-                is_fraud         BOOLEAN DEFAULT 0,
-                face_verified    BOOLEAN DEFAULT 0,
+                is_fraud         BOOLEAN DEFAULT FALSE,
+                face_verified    BOOLEAN DEFAULT FALSE,
                 created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 completed_at     TIMESTAMP,
                 notes            TEXT,
@@ -65,7 +70,7 @@ class MoneyTransferSystem:
 
         c.execute('''
             CREATE TABLE IF NOT EXISTS network_fees (
-                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                id             SERIAL PRIMARY KEY,
                 network        TEXT NOT NULL,
                 min_amount     REAL DEFAULT 0,
                 max_amount     REAL DEFAULT 999999999,
@@ -82,7 +87,7 @@ class MoneyTransferSystem:
             c.executemany('''
                 INSERT INTO network_fees
                 (network, min_amount, max_amount, fee_type, fee_amount, percentage_fee)
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s)
             ''', [
                 ("MTN",  1,        1000,       "fixed",      20,   0.0),
                 ("MTN",  1001,     10000,      "fixed",     100,   0.0),
@@ -95,11 +100,12 @@ class MoneyTransferSystem:
             ])
 
         try:
-            c.execute('ALTER TABLE money_transfers ADD COLUMN fee REAL DEFAULT 0.0')
+            c.execute('ALTER TABLE money_transfers ADD COLUMN IF NOT EXISTS fee REAL DEFAULT 0.0')
             conn.commit()
         except Exception:
             pass
         conn.commit()
+        c.close()
         conn.close()
 
     # ─────────────────────────────────────────────────────────────────────
@@ -112,7 +118,7 @@ class MoneyTransferSystem:
         Resets when a transaction is eventually allowed or when the user
         makes a successful transfer.
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
         c.execute('''
             CREATE TABLE IF NOT EXISTS over_balance_attempts (
@@ -126,12 +132,12 @@ class MoneyTransferSystem:
         conn.close()
 
     def _get_over_balance_count(self, user_id: int) -> int:
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
         
         # Check if last attempt was from a previous day - if so, reset at midnight
         c.execute(
-            "SELECT attempt_count, last_attempt FROM over_balance_attempts WHERE user_id = ?",
+            "SELECT attempt_count, last_attempt FROM over_balance_attempts WHERE user_id = %s",
             (user_id,)
         )
         row = c.fetchone()
@@ -140,13 +146,13 @@ class MoneyTransferSystem:
             attempt_count, last_attempt = row
             # Convert last_attempt to date and compare with today
             from datetime import datetime
-            last_date = datetime.strptime(last_attempt, "%Y-%m-%d %H:%M:%S").date()
+            last_date = last_attempt.date() if hasattr(last_attempt, 'date') else datetime.strptime(str(last_attempt)[:19], "%Y-%m-%d %H:%M:%S").date()
             today = datetime.now().date()
             
             if last_date < today:
                 # Reset counter at midnight for new day
                 c.execute(
-                    "DELETE FROM over_balance_attempts WHERE user_id = ?",
+                    "DELETE FROM over_balance_attempts WHERE user_id = %s",
                     (user_id,)
                 )
                 conn.commit()
@@ -160,23 +166,23 @@ class MoneyTransferSystem:
             return 0
 
     def _increment_over_balance(self, user_id: int):
-        conn = sqlite3.connect(self.db_path)
-        c = conn.cursor()
-        c.execute('''
-            INSERT INTO over_balance_attempts (user_id, attempt_count, last_attempt)
-            VALUES (?, 1, CURRENT_TIMESTAMP)
-            ON CONFLICT(user_id) DO UPDATE
-            SET attempt_count = attempt_count + 1,
-                last_attempt  = CURRENT_TIMESTAMP
-        ''', (user_id,))
-        conn.commit()
-        conn.close()
+      conn = self.get_connection()
+      c = conn.cursor()
+      c.execute('''
+        INSERT INTO over_balance_attempts (user_id, attempt_count, last_attempt)
+        VALUES (%s, 1, CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id) DO UPDATE
+        SET attempt_count = over_balance_attempts.attempt_count + 1,
+            last_attempt  = CURRENT_TIMESTAMP
+      ''', (user_id,))
+      conn.commit()
+      conn.close()
 
     def _reset_over_balance(self, user_id: int):
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
         c.execute(
-            "DELETE FROM over_balance_attempts WHERE user_id = ?",
+            "DELETE FROM over_balance_attempts WHERE user_id = %s",
             (user_id,)
         )
         conn.commit()
@@ -204,12 +210,12 @@ class MoneyTransferSystem:
         return {"valid": False, "phone": phone, "network": None}
 
     def _calculate_fee(self, network: str, amount: float) -> float:
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
         c.execute('''
             SELECT fee_type, fee_amount, percentage_fee
             FROM network_fees
-            WHERE network=? AND min_amount<=? AND max_amount>=?
+            WHERE network=%s AND min_amount<=%s AND max_amount>=%s
         ''', (network, amount, amount))
         row = c.fetchone()
         conn.close()
@@ -242,14 +248,14 @@ class MoneyTransferSystem:
 
         # ── 1b. Travel / SIM block check (sender) ────────────────────────
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self.get_connection()
             c = conn.cursor()
             today = __import__('datetime').date.today().isoformat()
             c.execute('''
                 SELECT destination_country, return_date FROM travel_records
-                WHERE user_phone = ?
-                  AND date(departure_date) <= date(?)
-                  AND date(return_date)    >= date(?)
+                WHERE user_phone = %s
+                  AND date(departure_date) <= date(%s)
+                  AND date(return_date)    >= date(%s)
                 ORDER BY id DESC LIMIT 1
             ''', (user["phone"], today, today))
             travel_row = c.fetchone()
@@ -279,13 +285,13 @@ class MoneyTransferSystem:
         try:
             import datetime as _dt
             _today = _dt.date.today().isoformat()
-            _conn = sqlite3.connect(self.db_path)
+            _conn = self.get_connection()
             _c = _conn.cursor()
             _c.execute("""
                 SELECT destination_country, return_date FROM travel_records
-                WHERE user_phone = ?
-                  AND date(departure_date) <= date(?)
-                  AND date(return_date)    >= date(?)
+                WHERE user_phone = %s
+                  AND date(departure_date) <= date(%s)
+                  AND date(return_date)    >= date(%s)
                 ORDER BY id DESC LIMIT 1
             """, (recipient["phone"], _today, _today))
             _rec_travel = _c.fetchone()
@@ -436,17 +442,17 @@ class MoneyTransferSystem:
         # ── 6. Complete the transfer ──────────────────────────────────────
         reference = self._generate_reference()
 
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
 
         c.execute('''
-            UPDATE users SET account_balance = account_balance - ?
-            WHERE id = ?
+            UPDATE users SET account_balance = account_balance - %s
+            WHERE id = %s
         ''', (total, user["id"]))
 
         c.execute('''
-            UPDATE users SET account_balance = account_balance + ?
-            WHERE phone_number = ? AND is_active = 1
+            UPDATE users SET account_balance = account_balance + %s
+            WHERE phone_number = %s AND is_active = TRUE
         ''', (amount, recipient["phone"]))
 
         conn.commit()
@@ -496,7 +502,7 @@ class MoneyTransferSystem:
                          transfer_type, network, reference, status,
                          fraud_score, ml_score, rule_score, risk_level,
                          is_fraud, face_verified, fee=0.0, notes=""):
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
         completed_at = datetime.now() if status == "completed" else None
         c.execute('''
@@ -504,7 +510,7 @@ class MoneyTransferSystem:
             (sender_id, recipient_phone, amount, fee, transfer_type, network,
              reference_number, status, fraud_score, ml_score, rule_score,
              risk_level, is_fraud, face_verified, completed_at, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ''', (sender_id, recipient_phone, amount, fee, transfer_type, network,
               reference, status, fraud_score, ml_score, rule_score,
               risk_level, is_fraud, face_verified, completed_at, notes))
@@ -520,7 +526,7 @@ class MoneyTransferSystem:
         if not user:
             return {"success": False, "error": "Invalid session."}
 
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_connection()
         c = conn.cursor()
 
         c.execute('''
@@ -530,8 +536,8 @@ class MoneyTransferSystem:
                    mt.notes, u.phone_number, 'sent'
             FROM money_transfers mt
             JOIN users u ON mt.sender_id = u.id
-            WHERE mt.sender_id = ?
-            ORDER BY mt.created_at DESC LIMIT ?
+            WHERE mt.sender_id = %s
+            ORDER BY mt.created_at DESC LIMIT %s
         ''', (user["id"], limit))
         sent_rows = c.fetchall()
 
@@ -542,8 +548,8 @@ class MoneyTransferSystem:
                    mt.notes, u.phone_number, 'received'
             FROM money_transfers mt
             JOIN users u ON mt.sender_id = u.id
-            WHERE mt.recipient_phone = ? AND mt.status = 'completed'
-            ORDER BY mt.created_at DESC LIMIT ?
+            WHERE mt.recipient_phone = %s AND mt.status = 'completed'
+            ORDER BY mt.created_at DESC LIMIT %s
         ''', (user["phone"], limit))
         received_rows = c.fetchall()
 

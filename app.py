@@ -45,7 +45,8 @@ Routes:
     GET  /api/health              → health check
 """
 
-import sqlite3
+import psycopg2
+import psycopg2.extras
 import os
 import base64
 import hashlib
@@ -72,12 +73,23 @@ app = Flask(__name__)
 CORS(app)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024   # 16 MB
 
-DB_PATH = "mobile_money_users.db"
+# PostgreSQL Configuration
+DB_CONFIG = {
+    'dbname': 'momo_fraud',
+    'user': 'postgres',
+    'password': 'Eric@!99',
+    'host': 'localhost',
+    'port': '5432'
+}
 
-auth_system     = AuthenticationSystem(DB_PATH)
-transfer_system = MoneyTransferSystem(DB_PATH)
-fraud_detector  = RealTimeFraudDetector(DB_PATH)
-user_reg        = UserRegistrationSystem(DB_PATH)
+def get_db_connection():
+    """Create and return a PostgreSQL database connection."""
+    return psycopg2.connect(**DB_CONFIG)
+
+auth_system     = AuthenticationSystem(DB_CONFIG)
+transfer_system = MoneyTransferSystem(DB_CONFIG)
+fraud_detector  = RealTimeFraudDetector(DB_CONFIG)
+user_reg        = UserRegistrationSystem(DB_CONFIG)
 travel_system   = TravelMonitoringSystem(user_reg)
 pin_monitor     = PinMonitoringSystem(user_reg)
 
@@ -88,10 +100,11 @@ provider_sessions = {}
 
 def _ensure_access_logs_table():
     """Create access_logs table if it doesn't exist."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS access_logs (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            id          SERIAL PRIMARY KEY,
             event_type  TEXT NOT NULL,
             identifier  TEXT,
             full_name   TEXT,
@@ -99,10 +112,11 @@ def _ensure_access_logs_table():
             ip_address  TEXT,
             status      TEXT NOT NULL,
             detail      TEXT,
-            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
     conn.commit()
+    cur.close()
     conn.close()
 
 _ensure_access_logs_table()
@@ -113,14 +127,16 @@ def _log_access(event_type: str, identifier: str, full_name: str,
     """Write one row to access_logs."""
     try:
         ip = request.remote_addr or "unknown"
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute(
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
             """INSERT INTO access_logs
                (event_type, identifier, full_name, role, ip_address, status, detail)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
             (event_type, identifier, full_name, role, ip, status, detail)
         )
         conn.commit()
+        cur.close()
         conn.close()
     except Exception:
         pass  # never break the main flow
@@ -150,29 +166,28 @@ def _hash_pin(pin: str) -> str:
 
 def _table_exists(conn, table: str) -> bool:
     c = conn.cursor()
-    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
-    return c.fetchone() is not None
+    c.execute("SELECT to_regclass(%s)", (table,))
+    return c.fetchone()[0] is not None
 
 
 def _ensure_pin_columns():
     """Ensure PIN columns exist (migration-safe)."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = psycopg2.connect(**DB_CONFIG)
     c = conn.cursor()
     for col, typedef in [
         ("pin_hash",       "TEXT"),
-        ("pin_blocked",    "INTEGER DEFAULT 0"),
+        ("pin_salt",       "TEXT"),
+        ("pin_attempts",   "INTEGER DEFAULT 0"),
+        ("pin_blocked",    "BOOLEAN DEFAULT FALSE"),
         ("pin_fail_count", "INTEGER DEFAULT 0"),
         ("insuf_count",    "INTEGER DEFAULT 0"),
     ]:
         try:
-            c.execute(f"ALTER TABLE users ADD COLUMN {col} {typedef}")
+            c.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {typedef}")
         except Exception:
             pass
     conn.commit()
     conn.close()
-
-
-_ensure_pin_columns()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -208,8 +223,10 @@ def admin_dashboard_page():
 
 @app.route("/api/register", methods=["POST"])
 def register():
+    print("[REGISTER] Request received", flush=True)
     try:
         data        = request.get_json() or {}
+        print(f"[REGISTER] Data keys: {list(data.keys())}", flush=True)
         full_name   = data.get("fullName", "").strip()
         phone       = data.get("phone", "").strip()
         email       = data.get("email", "").strip()
@@ -240,10 +257,10 @@ def register():
             }
 
         if result["success"] and pin and len(pin) >= 4:
-            # Save PIN immediately if provided during registration
-            conn = sqlite3.connect(DB_PATH)
-            conn.execute(
-                "UPDATE users SET pin_hash=?, pin_blocked=0, pin_fail_count=0 WHERE phone_number=?",
+            conn = psycopg2.connect(**DB_CONFIG)
+            cr = conn.cursor()
+            cr.execute(
+                "UPDATE users SET pin_hash=%s, pin_blocked=FALSE, pin_fail_count=0 WHERE phone_number=%s",
                 (_hash_pin(pin), phone)
             )
             conn.commit()
@@ -252,6 +269,8 @@ def register():
         return _ok(result) if result["success"] else _err(result["error"])
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return _err(f"Registration failed: {e}", 500)
 
 
@@ -292,9 +311,9 @@ def login():
         password = data.get("password", "")
 
         hashed = hashlib.sha256(password.encode()).hexdigest()
-        conn = sqlite3.connect(DB_PATH)
+        conn = psycopg2.connect(**DB_CONFIG)
         c = conn.cursor()
-        c.execute("SELECT id, name, email FROM service_providers WHERE email=? AND password=? AND is_active=1", (email, hashed))
+        c.execute("SELECT id, name, email FROM service_providers WHERE email=%s AND password=%s AND is_active=TRUE", (email, hashed))
         provider = c.fetchone()
         conn.close()
 
@@ -318,15 +337,11 @@ def login():
         if result["success"]:
             user_email = result.get("user", {}).get("email", "")
             user_name  = result.get("user", {}).get("name", "")
-            is_admin = user_email.endswith("@admin.com")
-            is_provider = user_email.endswith("@provider.com")
-            
-            if is_admin:
-                role = "admin"
+            role = result.get("user", {}).get("role", "user")
+            if role == "admin":
                 result["dashboard_type"] = "admin"
                 result["dashboard_url"] = "/admin_dashboard"
-            elif is_provider:
-                role = "provider"
+            elif role == "provider":
                 result["dashboard_type"] = "provider"
                 result["dashboard_url"] = "/provider_dashboard"
             else:
@@ -339,10 +354,10 @@ def login():
             # Tell frontend if user has a PIN set
             phone = result.get("user", {}).get("phone", "")
             if phone:
-                conn2 = sqlite3.connect(DB_PATH)
-                row = conn2.execute(
-                    "SELECT pin_hash, pin_blocked FROM users WHERE phone_number=?", (phone,)
-                ).fetchone()
+                conn2 = psycopg2.connect(**DB_CONFIG)
+                c2 = conn2.cursor()
+                c2.execute("SELECT pin_hash, pin_blocked FROM users WHERE phone_number=%s", (phone,))
+                row = c2.fetchone()
                 conn2.close()
                 result["has_pin"]    = bool(row and row[0])
                 result["pin_blocked"] = bool(row and row[1])
@@ -394,10 +409,10 @@ def validate_session():
             has_pin = False
             pin_blocked = False
             if phone:
-                conn = sqlite3.connect(DB_PATH)
-                row = conn.execute(
-                    "SELECT pin_hash, pin_blocked FROM users WHERE phone_number=?", (phone,)
-                ).fetchone()
+                conn = psycopg2.connect(**DB_CONFIG)
+                cv = conn.cursor()
+                cv.execute("SELECT pin_hash, pin_blocked FROM users WHERE phone_number=%s", (phone,))
+                row = cv.fetchone()
                 conn.close()
                 has_pin     = bool(row and row[0])
                 pin_blocked  = bool(row and row[1])
@@ -501,11 +516,13 @@ def update_face():
             return _err("Phone number does not match your account.")
 
         # ── Verify national_id matches DB record ──────────────────────────
-        conn = sqlite3.connect(DB_PATH)
-        row = conn.execute(
-            "SELECT national_id, face_encoding, face_image_path FROM users WHERE phone_number=?",
+        conn = psycopg2.connect(**DB_CONFIG)
+        cuf = conn.cursor()
+        cuf.execute(
+            "SELECT national_id, face_encoding, face_image_path FROM users WHERE phone_number=%s",
             (validated_phone,)
-        ).fetchone()
+        )
+        row = cuf.fetchone()
         conn.close()
 
         if not row:
@@ -521,14 +538,33 @@ def update_face():
             similarity_check = user_reg.verify_face_from_base64(validated_phone, face_b64, tolerance=0.60)
             if not similarity_check.get("verified"):
                 err_msg = similarity_check.get("error", "")
-                # If it failed because of quality/completeness, let that error surface
-                # If it failed because the face doesn't match, reject the update
                 if "does not match" in (err_msg or "") or "similar" in (err_msg or "") or not err_msg:
-                    return _err(
-                        "Your face does not match the existing registered face on this account. "
-                        "You may not be the account owner — face update rejected to protect this account. "
-                        "If this is your account, try better lighting or a different angle."
+                    _log_access(
+                        "FACE_UPDATE_FAIL",
+                        user.get("phone", ""),
+                        user.get("name", ""),
+                        "user",
+                        "FAILED",
+                        "Face does not match registered face — update rejected"
                     )
+                    return _err(
+                        "⚠️ Face verification failed — your face does not match the registered face on this account.\n\n"
+                        "Possible reasons:\n"
+                        "• You are not the registered owner of this account\n"
+                        "• Poor lighting — move to a brighter area and try again\n"
+                        "• Remove glasses, hat, or anything covering your face\n"
+                        "• Look directly at the camera — avoid angles\n\n"
+                        "This attempt has been blocked and logged for security. "
+                        "If this is truly your account, contact support with your National ID."
+                    )
+                _log_access(
+                    "FACE_UPDATE_FAIL",
+                    user.get("phone", ""),
+                    user.get("name", ""),
+                    "user",
+                    "FAILED",
+                    (err_msg or "Face verification failed")[:200]
+                )
                 return _err(err_msg or "Face verification failed.")
 
         # ── Run the update — overwrites existing DB encoding + folder image ──
@@ -563,9 +599,10 @@ def set_pin():
         if not user:
             return _err("Invalid session.", 401)
 
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute(
-            "UPDATE users SET pin_hash=?, pin_blocked=0, pin_fail_count=0 WHERE phone_number=?",
+        conn = psycopg2.connect(**DB_CONFIG)
+        cs = conn.cursor()
+        cs.execute(
+            "UPDATE users SET pin_hash=%s, pin_blocked=FALSE, pin_fail_count=0 WHERE phone_number=%s",
             (_hash_pin(pin), user["phone"])
         )
         conn.commit()
@@ -598,11 +635,13 @@ def verify_pin():
         if not user:
             return _err("Invalid session.", 401)
 
-        conn = sqlite3.connect(DB_PATH)
-        row = conn.execute(
-            "SELECT pin_hash, pin_blocked, pin_fail_count FROM users WHERE phone_number=?",
+        conn = psycopg2.connect(**DB_CONFIG)
+        cp = conn.cursor()
+        cp.execute(
+            "SELECT pin_hash, pin_blocked, pin_fail_count FROM users WHERE phone_number=%s",
             (user["phone"],)
-        ).fetchone()
+        )
+        row = cp.fetchone()
 
         if not row or not row[0]:
             conn.close()
@@ -619,8 +658,8 @@ def verify_pin():
         # Check PIN
         if _hash_pin(pin) == pin_hash:
             # Correct — reset fail count
-            conn.execute(
-                "UPDATE users SET pin_fail_count=0 WHERE phone_number=?",
+            cp.execute(
+                "UPDATE users SET pin_fail_count=0 WHERE phone_number=%s",
                 (user["phone"],)
             )
             conn.commit()
@@ -630,8 +669,8 @@ def verify_pin():
             # Wrong PIN
             fail_count += 1
             if fail_count >= 3:
-                conn.execute(
-                    "UPDATE users SET pin_fail_count=3, pin_blocked=1 WHERE phone_number=?",
+                cp.execute(
+                    "UPDATE users SET pin_fail_count=3, pin_blocked=TRUE WHERE phone_number=%s",
                     (user["phone"],)
                 )
                 conn.commit()
@@ -651,8 +690,8 @@ def verify_pin():
                 })
             else:
                 remaining = 3 - fail_count
-                conn.execute(
-                    "UPDATE users SET pin_fail_count=? WHERE phone_number=?",
+                cp.execute(
+                    "UPDATE users SET pin_fail_count=%s WHERE phone_number=%s",
                     (fail_count, user["phone"])
                 )
                 conn.commit()
@@ -698,11 +737,13 @@ def verify_identity():
         if not validated_phone:
             return _err("Invalid phone number format.")
 
-        conn = sqlite3.connect(DB_PATH)
-        row = conn.execute(
-            "SELECT full_name, national_id FROM users WHERE phone_number=?",
+        conn = psycopg2.connect(**DB_CONFIG)
+        cvi = conn.cursor()
+        cvi.execute(
+            "SELECT full_name, national_id FROM users WHERE phone_number=%s",
             (validated_phone,)
-        ).fetchone()
+        )
+        row = cvi.fetchone()
         conn.close()
 
         if not row:
@@ -753,11 +794,13 @@ def reset_pin():
             return _err("Invalid session.", 401)
 
         # Step 1: Verify National ID matches
-        conn = sqlite3.connect(DB_PATH)
-        row = conn.execute(
-            "SELECT national_id, face_encoding FROM users WHERE phone_number=?",
+        conn = psycopg2.connect(**DB_CONFIG)
+        crp = conn.cursor()
+        crp.execute(
+            "SELECT national_id, face_encoding FROM users WHERE phone_number=%s",
             (user["phone"],)
-        ).fetchone()
+        )
+        row = crp.fetchone()
         conn.close()
 
         if not row:
@@ -774,12 +817,21 @@ def reset_pin():
 
         face_match = _verify_face(face_b64, stored_face_encoding)
         if not face_match["match"]:
+            _log_access(
+                "PIN_RESET_FACE_FAIL",
+                user.get("phone", ""),
+                user.get("name", ""),
+                "user",
+                "FAILED",
+                face_match["reason"][:200]
+            )
             return _err(f"Face verification failed: {face_match['reason']}")
 
         # Step 3: Set new PIN, unblock
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute(
-            "UPDATE users SET pin_hash=?, pin_blocked=0, pin_fail_count=0 WHERE phone_number=?",
+        conn = psycopg2.connect(**DB_CONFIG)
+        crp2 = conn.cursor()
+        crp2.execute(
+            "UPDATE users SET pin_hash=%s, pin_blocked=FALSE, pin_fail_count=0 WHERE phone_number=%s",
             (_hash_pin(new_pin), user["phone"])
         )
         conn.commit()
@@ -841,9 +893,14 @@ def _verify_face(face_b64: str, stored_encoding_bytes: bytes) -> dict:
             return {
                 "match": False,
                 "reason": (
-                    "Your face does not match the registered face on this account. "
-                    "Try better lighting, remove glasses, or face the camera directly. "
-                    "If you are not the account owner, this action is not allowed."
+                    " Face verification failed — this face does not match the account owner.\n\n"
+                    "Possible reasons:\n"
+                    "• You are not the registered owner of this account\n"
+                    "• Poor lighting — move to a brighter area and try again\n"
+                    "• Remove glasses, hat, or anything covering your face\n"
+                    "• Look directly at the camera — avoid angles\n\n"
+                    "This attempt has been blocked and logged for security. "
+                    "If this is truly your account, contact support with your National ID."
                 )
             }
 
@@ -920,9 +977,9 @@ def check_recipient():
         if not phone:
             return _err("Phone number required.")
 
-        conn = sqlite3.connect(DB_PATH)
+        conn = psycopg2.connect(**DB_CONFIG)
         c    = conn.cursor()
-        c.execute("SELECT full_name, is_active FROM users WHERE phone_number=?", (phone,))
+        c.execute("SELECT full_name, is_active FROM users WHERE phone_number=%s", (phone,))
         row = c.fetchone()
 
         if not row:
@@ -936,9 +993,9 @@ def check_recipient():
             today = datetime.date.today().isoformat()
             c.execute("""
                 SELECT destination_country, return_date FROM travel_records
-                WHERE user_phone=?
-                  AND date(departure_date) <= date(?)
-                  AND date(return_date)    >= date(?)
+                WHERE user_phone=%s
+                  AND departure_date::date <= %s::date
+                  AND return_date::date    >= %s::date
                 ORDER BY id DESC LIMIT 1
             """, (phone, today, today))
             travel = c.fetchone()
@@ -1003,36 +1060,36 @@ def travel_status(phone):
 @app.route("/api/dashboard/stats", methods=["GET"])
 def dashboard_stats():
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = psycopg2.connect(**DB_CONFIG)
         c    = conn.cursor()
 
-        def q(sql, *args):
-            c.execute(sql, args)
+        def q(sql):
+            c.execute(sql)
             return c.fetchone()[0]
 
         stats = {
             "total_users"            : q("SELECT COUNT(*) FROM users WHERE email NOT LIKE '%@admin.com'"),
-            "active_users"           : q("SELECT COUNT(*) FROM users WHERE is_active=1"),
-            "active_providers"       : q("SELECT COUNT(*) FROM service_providers WHERE is_active=1"),
+            "active_users"           : q("SELECT COUNT(*) FROM users WHERE is_active=TRUE"),
+            "active_providers"       : q("SELECT COUNT(*) FROM service_providers WHERE is_active=TRUE"),
             "users_abroad"           : q(
                 "SELECT COUNT(*) FROM travel_records "
-                "WHERE departure_date<=datetime('now') AND return_date>=datetime('now')"),
+                "WHERE departure_date<=NOW() AND return_date>=NOW()"),
             "transfers_today"        : q(
                 "SELECT COUNT(*) FROM money_transfers "
-                "WHERE date(created_at)=date('now')"),
+                "WHERE created_at::date=CURRENT_DATE"),
             "transfers_7d"           : q(
                 "SELECT COUNT(*) FROM money_transfers "
-                "WHERE created_at>=datetime('now','-7 days')"),
+                "WHERE created_at>=NOW()-INTERVAL '7 days'"),
             "fraud_blocked_7d"       : q(
                 "SELECT COUNT(*) FROM money_transfers "
-                "WHERE is_fraud=1 AND created_at>=datetime('now','-7 days')"),
+                "WHERE is_fraud=TRUE AND created_at>=NOW()-INTERVAL '7 days'"),
             "face_verified_transfers": q(
-                "SELECT COUNT(*) FROM money_transfers WHERE face_verified=1"),
+                "SELECT COUNT(*) FROM money_transfers WHERE face_verified=TRUE"),
             "total_volume_7d"        : q(
                 "SELECT COALESCE(SUM(amount),0) FROM money_transfers "
-                "WHERE status='completed' AND created_at>=datetime('now','-7 days')"),
+                "WHERE status='completed' AND created_at>=NOW()-INTERVAL '7 days'"),
             "fraud_alerts"           : q(
-                "SELECT COUNT(*) FROM fraud_alerts WHERE acknowledged=0")
+                "SELECT COUNT(*) FROM fraud_alerts WHERE acknowledged=FALSE")
                 if _table_exists(conn, "fraud_alerts") else 0,
         }
 
@@ -1102,18 +1159,12 @@ def admin_user_lookup():
         if not phone:
             return _err("phone_number required.")
 
-        conn = sqlite3.connect(DB_PATH)
+        conn = psycopg2.connect(**DB_CONFIG)
         c    = conn.cursor()
 
-        c.execute("PRAGMA table_info(users)")
-        columns = [row[1] for row in c.fetchall()]
-
-        if "full_name" in columns and "phone_number" in columns:
-            c.execute(
-                "SELECT full_name, phone_number, email, national_id, account_balance, is_active "
-                "FROM users WHERE phone_number=?", (phone,))
-        else:
-            c.execute("SELECT * FROM users WHERE phone_number=?", (phone,))
+        c.execute(
+            "SELECT full_name, phone_number, email, national_id, account_balance, is_active "
+            "FROM users WHERE phone_number=%s", (phone,))
 
         user_row = c.fetchone()
         if not user_row:
@@ -1134,13 +1185,13 @@ def admin_user_lookup():
                 "mt.status, mt.created_at, mt.fraud_score, mt.risk_level, mt.is_fraud, "
                 "mt.notes, 'sent' "
                 "FROM money_transfers mt JOIN users u2 ON mt.sender_id=u2.id "
-                "WHERE u2.phone_number=? ORDER BY mt.created_at DESC LIMIT 20", (phone,))
+                "WHERE u2.phone_number=%s ORDER BY mt.created_at DESC LIMIT 20", (phone,))
             sent_rows = c.fetchall()
             c.execute(
                 "SELECT u2.phone_number, mt.recipient_phone, mt.amount, 0, mt.status, "
                 "mt.created_at, mt.fraud_score, mt.risk_level, mt.is_fraud, mt.notes, 'received' "
                 "FROM money_transfers mt JOIN users u2 ON mt.sender_id=u2.id "
-                "WHERE mt.recipient_phone=? AND mt.status='completed' "
+                "WHERE mt.recipient_phone=%s AND mt.status='completed' "
                 "ORDER BY mt.created_at DESC LIMIT 20", (phone,))
             recv_rows = c.fetchall()
             all_rows = sorted(list(sent_rows) + list(recv_rows), key=lambda x: x[5] or "", reverse=True)
@@ -1157,7 +1208,7 @@ def admin_user_lookup():
             try:
                 c.execute(
                     "SELECT message, fraud_score, risk_level, action, created_at "
-                    "FROM fraud_alerts WHERE phone_number=? "
+                    "FROM fraud_alerts WHERE phone_number=%s "
                     "ORDER BY created_at DESC LIMIT 10", (phone,))
                 user["alerts"] = [{"message": r[0], "fraud_score": r[1],
                                    "risk_level": r[2], "action": r[3], "created_at": r[4]}
@@ -1171,28 +1222,20 @@ def admin_user_lookup():
         return _err(f"User lookup failed: {e}", 500)
 
 
+@app.route("/api/admin/users", methods=["GET"])
 @app.route("/api/admin/all-users", methods=["GET"])
 def admin_all_users():
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = psycopg2.connect(**DB_CONFIG)
         c    = conn.cursor()
-        c.execute("PRAGMA table_info(users)")
-        columns = [row[1] for row in c.fetchall()]
-        order_col = "registration_date" if "registration_date" in columns else "id"
-
-        if "full_name" in columns and "phone_number" in columns:
-            c.execute(f"SELECT full_name, phone_number, email, account_balance, is_active, national_id, sex "
-                      f"FROM users WHERE email NOT LIKE '%@admin.com' ORDER BY {order_col} DESC")
-            users = [{"full_name": r[0], "phone_number": r[1], "email": r[2] if len(r)>2 else "",
-                      "account_balance": r[3] if len(r)>3 else 0, "is_active": bool(r[4]) if len(r)>4 else True,
-                      "national_id": r[5] if len(r)>5 else "", "sex": r[6] if len(r)>6 else ""}
-                     for r in c.fetchall()]
-        else:
-            c.execute(f"SELECT * FROM users WHERE email NOT LIKE '%@admin.com' ORDER BY {order_col} DESC")
-            users = [{"full_name": r[1] if len(r)>1 else "Unknown", "phone_number": r[2] if len(r)>2 else "Unknown",
-                      "email": r[3] if len(r)>3 else "", "account_balance": r[4] if len(r)>4 else 0,
-                      "is_active": bool(r[5]) if len(r)>5 else True}
-                     for r in c.fetchall()]
+        c.execute(
+            "SELECT full_name, phone_number, email, account_balance, is_active, national_id, gender "
+            "FROM users WHERE email NOT LIKE '%@admin.com' ORDER BY registration_date DESC"
+        )
+        users = [{"full_name": r[0], "phone_number": r[1], "email": r[2],
+                  "account_balance": r[3], "is_active": bool(r[4]),
+                  "national_id": r[5], "sex": r[6]}
+                 for r in c.fetchall()]
         conn.close()
         return _ok({"success": True, "users": users})
     except Exception as e:
@@ -1206,40 +1249,17 @@ def admin_all_users():
 @app.route("/api/admin/providers", methods=["GET"])
 def admin_get_providers():
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = psycopg2.connect(**DB_CONFIG)
         c = conn.cursor()
-        c.execute("PRAGMA table_info(service_providers)")
-        columns = [row[1] for row in c.fetchall()]
-        
-        # Build query based on available columns
-        select_cols = ["id", "name", "email"]
-        if "phone" in columns:
-            select_cols.append("phone")
-        if "national_id" in columns:
-            select_cols.append("national_id")
-        if "sex" in columns:
-            select_cols.append("sex")
-        select_cols.extend(["is_active", "created_at"])
-        
-        c.execute(f"SELECT {', '.join(select_cols)} FROM service_providers ORDER BY created_at DESC")
-        
-        providers = []
-        for row in c.fetchall():
-            provider = {
-                "id": row[0],
-                "name": row[1],
-                "email": row[2],
-                "is_active": bool(row[select_cols.index("is_active")]),
-                "created_date": row[select_cols.index("created_at")]
-            }
-            if "phone" in select_cols:
-                provider["phone"] = row[select_cols.index("phone")]
-            if "national_id" in select_cols:
-                provider["national_id"] = row[select_cols.index("national_id")]
-            if "sex" in select_cols:
-                provider["sex"] = row[select_cols.index("sex")]
-            providers.append(provider)
-        
+        c.execute(
+            "SELECT id, name, email, phone, national_id, sex, is_active, created_at "
+            "FROM service_providers ORDER BY created_at DESC"
+        )
+        providers = [
+            {"id": r[0], "name": r[1], "email": r[2], "phone": r[3],
+             "national_id": r[4], "sex": r[5], "is_active": bool(r[6]), "created_date": r[7]}
+            for r in c.fetchall()
+        ]
         conn.close()
         return _ok({"success": True, "providers": providers})
     except Exception as e:
@@ -1261,24 +1281,20 @@ def admin_add_provider():
         if not all([name, email, password]):
             return _err("Name, email, and password are required.")
         
-        conn = sqlite3.connect(DB_PATH)
+        conn = psycopg2.connect(**DB_CONFIG)
         c = conn.cursor()
         
-        # Check if email already exists
-        c.execute("SELECT id FROM service_providers WHERE email=?", (email,))
+        c.execute("SELECT id FROM service_providers WHERE email=%s", (email,))
         if c.fetchone():
             conn.close()
             return _err("Email already exists.")
         
-        # Hash password
-        import hashlib
         hashed_password = hashlib.sha256(password.encode()).hexdigest()
         
-        # Insert provider
         c.execute(
             "INSERT INTO service_providers (name, email, phone, national_id, sex, password, is_active, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))",
-            (name, email, phone, national_id, sex, hashed_password, int(status))
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())",
+            (name, email, phone, national_id, sex, hashed_password, bool(int(status)))
         )
         
         conn.commit()
@@ -1301,23 +1317,21 @@ def admin_toggle_provider():
         if not provider_id:
             return _err("Provider ID is required.")
         
-        conn = sqlite3.connect(DB_PATH)
+        conn = psycopg2.connect(**DB_CONFIG)
         c = conn.cursor()
         
-        # Get current status
-        c.execute("SELECT is_active FROM service_providers WHERE id=?", (provider_id,))
+        c.execute("SELECT is_active FROM service_providers WHERE id=%s", (provider_id,))
         result = c.fetchone()
         if not result:
             conn.close()
             return _err("Provider not found.")
         
-        # Toggle status
-        new_status = 0 if result[0] == 1 else 1
-        c.execute("UPDATE service_providers SET is_active=? WHERE id=?", (new_status, provider_id))
+        new_status = not result[0]
+        c.execute("UPDATE service_providers SET is_active=%s WHERE id=%s", (new_status, provider_id))
         conn.commit()
         conn.close()
         
-        status_text = "activated" if new_status == 1 else "deactivated"
+        status_text = "activated" if new_status else "deactivated"
         return _ok({
             "success": True,
             "message": f"Provider {status_text} successfully"
@@ -1342,35 +1356,29 @@ def admin_update_provider():
         if not all([provider_id, name, email]):
             return _err("Provider ID, name, and email are required.")
         
-        conn = sqlite3.connect(DB_PATH)
+        conn = psycopg2.connect(**DB_CONFIG)
         c = conn.cursor()
         
-        # Check if provider exists
-        c.execute("SELECT id FROM service_providers WHERE id=?", (provider_id,))
+        c.execute("SELECT id FROM service_providers WHERE id=%s", (provider_id,))
         if not c.fetchone():
             conn.close()
             return _err("Provider not found.")
         
-        # Check if email is already used by another provider
-        c.execute("SELECT id FROM service_providers WHERE email=? AND id!=?", (email, provider_id))
+        c.execute("SELECT id FROM service_providers WHERE email=%s AND id!=%s", (email, provider_id))
         if c.fetchone():
             conn.close()
             return _err("Email is already used by another provider.")
         
-        # Update provider
         if password:
-            # Update with new password
-            import hashlib
             hashed_password = hashlib.sha256(password.encode()).hexdigest()
             c.execute(
-                "UPDATE service_providers SET name=?, email=?, phone=?, national_id=?, sex=?, password=?, is_active=? WHERE id=?",
-                (name, email, phone, national_id, sex, hashed_password, int(status), provider_id)
+                "UPDATE service_providers SET name=%s, email=%s, phone=%s, national_id=%s, sex=%s, password=%s, is_active=%s WHERE id=%s",
+                (name, email, phone, national_id, sex, hashed_password, bool(int(status)), provider_id)
             )
         else:
-            # Update without changing password
             c.execute(
-                "UPDATE service_providers SET name=?, email=?, phone=?, national_id=?, sex=?, is_active=? WHERE id=?",
-                (name, email, phone, national_id, sex, int(status), provider_id)
+                "UPDATE service_providers SET name=%s, email=%s, phone=%s, national_id=%s, sex=%s, is_active=%s WHERE id=%s",
+                (name, email, phone, national_id, sex, bool(int(status)), provider_id)
             )
         
         conn.commit()
@@ -1393,11 +1401,10 @@ def admin_delete_provider():
         if not provider_id:
             return _err("Provider ID is required.")
         
-        conn = sqlite3.connect(DB_PATH)
+        conn = psycopg2.connect(**DB_CONFIG)
         c = conn.cursor()
         
-        # Delete provider
-        c.execute("DELETE FROM service_providers WHERE id=?", (provider_id,))
+        c.execute("DELETE FROM service_providers WHERE id=%s", (provider_id,))
         if c.rowcount == 0:
             conn.close()
             return _err("Provider not found.")
@@ -1415,19 +1422,22 @@ def admin_delete_provider():
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ADMIN USER MANAGEMENT ROUTES (EXTENDED)
+from datetime import timezone, timedelta
+
+EAT = timedelta(hours=3)
+
 @app.route("/api/admin/access-logs", methods=["GET"])
 def admin_get_access_logs():
     try:
         limit = min(int(request.args.get("limit", 100)), 500)
-        conn = sqlite3.connect(DB_PATH)
-        _ensure_access_logs_table()
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("""
             SELECT id, event_type, identifier, full_name, role,
                    ip_address, status, detail, created_at
             FROM access_logs
             ORDER BY created_at DESC
-            LIMIT ?
+            LIMIT %s
         """, (limit,))
         rows = c.fetchall()
         conn.close()
@@ -1441,7 +1451,7 @@ def admin_get_access_logs():
                 "ip_address": row[5] or "",
                 "status":     row[6],
                 "detail":     row[7] or "",
-                "created_at": row[8]
+                "created_at": row[8].strftime("%d/%m/%Y %H:%M:%S") if row[8] else "—"
             }
             for row in rows
         ]
@@ -1455,7 +1465,7 @@ def admin_get_access_logs():
 @app.route("/api/admin/fraud-alerts", methods=["GET"])
 def admin_get_fraud_alerts():
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = psycopg2.connect(**DB_CONFIG)
         c = conn.cursor()
 
         if not _table_exists(conn, "fraud_alerts"):
@@ -1520,45 +1530,43 @@ def admin_update_user_multi():
         if not all([phone, full_name]):
             return _err("Phone number and full name are required.")
         
-        conn = sqlite3.connect(DB_PATH)
+        conn = psycopg2.connect(**DB_CONFIG)
         c = conn.cursor()
         
-        # Check if user exists
-        c.execute("SELECT phone_number FROM users WHERE phone_number=?", (phone,))
+        c.execute("SELECT phone_number FROM users WHERE phone_number=%s", (phone,))
         if not c.fetchone():
             conn.close()
             return _err("User not found.")
         
-        # Update user with multiple fields
         update_fields = []
         update_values = []
         
-        update_fields.append("full_name=?")
+        update_fields.append("full_name=%s")
         update_values.append(full_name)
         
         if email is not None:
-            update_fields.append("email=?")
+            update_fields.append("email=%s")
             update_values.append(email)
         
         if national_id is not None:
-            update_fields.append("national_id=?")
+            update_fields.append("national_id=%s")
             update_values.append(national_id)
         
         if sex is not None:
-            update_fields.append("sex=?")
+            update_fields.append("gender=%s")
             update_values.append(sex)
         
         if account_balance is not None:
-            update_fields.append("account_balance=?")
+            update_fields.append("account_balance=%s")
             update_values.append(account_balance)
         
         if is_active is not None:
-            update_fields.append("is_active=?")
-            update_values.append(1 if is_active else 0)
+            update_fields.append("is_active=%s")
+            update_values.append(bool(is_active))
         
-        update_values.append(phone)  # For WHERE clause
+        update_values.append(phone)
         
-        c.execute(f"UPDATE users SET {', '.join(update_fields)} WHERE phone_number=?", update_values)
+        c.execute(f"UPDATE users SET {', '.join(update_fields)} WHERE phone_number=%s", update_values)
         conn.commit()
         conn.close()
         
@@ -1585,20 +1593,20 @@ def admin_update_user():
         if field not in valid_fields:
             return _err(f"Invalid field. Must be one of: {', '.join(valid_fields)}")
         
-        conn = sqlite3.connect(DB_PATH)
+        conn = psycopg2.connect(**DB_CONFIG)
         c = conn.cursor()
         
         # Check if user exists
-        c.execute("SELECT phone_number FROM users WHERE phone_number=?", (phone,))
+        c.execute("SELECT phone_number FROM users WHERE phone_number=%s", (phone,))
         if not c.fetchone():
             conn.close()
             return _err("User not found.")
         
         # Update user
         if field == "is_active":
-            value = 1 if value else 0
+            value = True if value else False
         
-        c.execute(f"UPDATE users SET {field}=? WHERE phone_number=?", (value, phone))
+        c.execute(f"UPDATE users SET {field}=%s WHERE phone_number=%s", (value, phone))
         conn.commit()
         conn.close()
         
@@ -1619,11 +1627,11 @@ def admin_delete_user():
         if not phone:
             return _err("Phone number is required.")
         
-        conn = sqlite3.connect(DB_PATH)
+        conn = psycopg2.connect(**DB_CONFIG)
         c = conn.cursor()
         
         # Delete user
-        c.execute("DELETE FROM users WHERE phone_number=?", (phone,))
+        c.execute("DELETE FROM users WHERE phone_number=%s", (phone,))
         if c.rowcount == 0:
             conn.close()
             return _err("User not found.")
@@ -1653,7 +1661,16 @@ def admin_create_backup():
         backup_path = f"backup_{timestamp}.db"
         
         # Create backup
-        shutil.copy2(DB_PATH, backup_path)
+        # PostgreSQL backup via pg_dump
+        import subprocess
+        result_proc = subprocess.run(
+            ["pg_dump", "-U", DB_CONFIG["user"], "-h", DB_CONFIG["host"],
+             "-p", DB_CONFIG["port"], "-F", "c", "-f", backup_path, DB_CONFIG["dbname"]],
+            capture_output=True, text=True,
+            env={**os.environ, "PGPASSWORD": DB_CONFIG["password"]}
+        )
+        if result_proc.returncode != 0:
+            return _err(f"pg_dump failed: {result_proc.stderr}")
         
         return _ok({
             "success": True,
@@ -1670,11 +1687,13 @@ def admin_system_stats():
         import os
         
         # Database size
-        db_size = os.path.getsize(DB_PATH) if os.path.exists(DB_PATH) else 0
-        db_size_mb = round(db_size / (1024 * 1024), 2)
-        
-        # Active sessions
-        active_user_sessions = len(auth_system.sessions)
+        conn = psycopg2.connect(**DB_CONFIG)
+        c = conn.cursor()
+        c.execute("SELECT pg_database_size(%s)", (DB_CONFIG["dbname"],))
+        db_size_mb = round(c.fetchone()[0] / (1024 * 1024), 2)
+        conn.close()
+
+        active_user_sessions = len(provider_sessions)
         active_provider_sessions = len(provider_sessions)
         
         # System uptime (simplified)
@@ -1721,6 +1740,175 @@ def server_error(e):
     return _err("Internal server error.", 500)
 
 
+# ── User convenience aliases (frontend uses /api/user/* prefix) ──────────────
+
+@app.route("/api/user/balance", methods=["POST"])
+def user_balance():
+    try:
+        data = request.get_json() or {}
+        token = data.get("session_token") or _session_token()  # ← accept both
+        if not token:
+            return _err("Missing session token.", 401)
+        user = auth_system.validate_session(token)
+        if not user:
+            return _err("Invalid session.", 401)
+        conn = psycopg2.connect(**DB_CONFIG)
+        c = conn.cursor()
+        c.execute("SELECT account_balance FROM users WHERE phone_number=%s", (user["phone"],))
+        row = c.fetchone()
+        conn.close()
+        return _ok({"success": True, "balance": row[0] if row else 0})
+    except Exception as e:
+        return _err(f"Balance fetch failed: {e}", 500)
+
+
+@app.route("/api/user/history", methods=["POST"])
+def user_history_post():
+    data = request.get_json() or {}
+    token = data.get("session_token") or _session_token()
+    if not token:
+        return _err("Missing session token.", 401)
+    limit = data.get("limit", 50)
+    result = transfer_system.get_transfer_history(token, limit)
+    if result["success"]:
+        # rename "transfers" → "history" so frontend can read d.history
+        result["history"] = result.pop("transfers", [])
+        return _ok(result)
+    return _err(result["error"])
+
+
+@app.route("/api/user/profile", methods=["POST"])
+def user_profile():
+    try:
+        data = request.get_json() or {}
+        token = data.get("session_token") or _session_token()  # ← accept both
+        if not token:
+            return _err("Missing session token.", 401)
+        user = auth_system.validate_session(token)
+        if not user:
+            return _err("Invalid session.", 401)
+        conn = psycopg2.connect(**DB_CONFIG)
+        c = conn.cursor()
+        c.execute(
+            "SELECT full_name, email, phone_number, national_id, account_balance, gender FROM users WHERE phone_number=%s",
+            (user["phone"],)
+        )
+        row = c.fetchone()
+        conn.close()
+        if not row:
+            return _err("User not found.")
+        return _ok({"success": True, "user": {   # ← key must be "user" not "profile"
+            "name": row[0], "email": row[1], "phone": row[2],
+            "national_id": row[3], "balance": row[4], "sex": row[5]
+        }})
+    except Exception as e:
+        return _err(f"Profile fetch failed: {e}", 500)
+
+
+@app.route("/api/user/lookup", methods=["POST"])
+def user_lookup():
+    return check_recipient()  # reuse existing logic
+
+
+# Aliases for paths the frontend uses with /api/user/ prefix
+@app.route("/api/user/verify-identity", methods=["POST"])
+def user_verify_identity():
+    return verify_identity()
+
+@app.route("/api/user/reset-pin", methods=["POST"])
+def user_reset_pin():
+    return reset_pin()
+
+@app.route("/api/user/update-face", methods=["POST"])
+def user_update_face():
+    return update_face()  
+
+
+@app.route('/api/admin/user-transactions', methods=['POST'])
+def admin_user_transactions():
+    data = request.get_json() or {}
+    phone_number = data.get('phone_number', '').strip()
+    if not phone_number:
+        return jsonify({'success': False, 'error': 'Phone number required'}), 400
+
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+
+        # Sent transactions
+        c.execute("""
+            SELECT u.phone_number AS sender_phone, mt.recipient_phone, mt.amount,
+                   COALESCE(mt.fee, 0) AS fee, mt.status, mt.created_at,
+                   mt.fraud_score, mt.risk_level, mt.is_fraud, mt.notes
+            FROM money_transfers mt
+            JOIN users u ON mt.sender_id = u.id
+            WHERE u.phone_number = %s
+            ORDER BY mt.created_at DESC
+            LIMIT 30
+        """, (phone_number,))
+        sent = [{'sender_phone': r[0], 'receiver_phone': r[1], 'amount': r[2],
+                 'fee': r[3], 'status': r[4],
+                 'created_at': r[5].isoformat() if r[5] else None,
+                 'fraud_score': r[6], 'risk_level': r[7],
+                 'is_fraud': bool(r[8]), 'notes': r[9]} for r in c.fetchall()]
+
+        # Received transactions
+        c.execute("""
+            SELECT u.phone_number AS sender_phone, mt.recipient_phone, mt.amount,
+                   0 AS fee, mt.status, mt.created_at,
+                   mt.fraud_score, mt.risk_level, mt.is_fraud, mt.notes
+            FROM money_transfers mt
+            JOIN users u ON mt.sender_id = u.id
+            WHERE mt.recipient_phone = %s AND mt.status = 'completed'
+            ORDER BY mt.created_at DESC
+            LIMIT 30
+        """, (phone_number,))
+        received = [{'sender_phone': r[0], 'receiver_phone': r[1], 'amount': r[2],
+                     'fee': r[3], 'status': r[4],
+                     'created_at': r[5].isoformat() if r[5] else None,
+                     'fraud_score': r[6], 'risk_level': r[7],
+                     'is_fraud': bool(r[8]), 'notes': r[9]} for r in c.fetchall()]
+
+        conn.close()
+
+        # Merge and sort by date
+        all_tx = sorted(sent + received,
+                        key=lambda x: x['created_at'] or '', reverse=True)[:50]
+
+        return jsonify({'success': True, 'transactions': all_tx})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/user-fraud-alerts', methods=['POST'])
+def admin_user_fraud_alerts():
+    data = request.get_json() or {}
+    phone_number = data.get('phone_number', '').strip()
+    if not phone_number:
+        return jsonify({'success': False, 'error': 'Phone number required'}), 400
+
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute("""
+            SELECT id, phone_number, amount, fraud_score, risk_level,
+                   action, alert_message, acknowledged, created_at
+            FROM fraud_alerts
+            WHERE phone_number = %s
+            ORDER BY created_at DESC
+            LIMIT 50
+        """, (phone_number,))
+        alerts = [{'id': r[0], 'phone_number': r[1], 'amount': r[2],
+                   'fraud_score': r[3], 'risk_level': r[4], 'action': r[5],
+                   'message': r[6], 'acknowledged': bool(r[7]),
+                   'created_at': r[8].isoformat() if r[8] else None}
+                  for r in c.fetchall()]
+        conn.close()
+        return jsonify({'success': True, 'alerts': alerts})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500     
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # ENTRY POINT
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1734,4 +1922,4 @@ if __name__ == "__main__":
     print(f"  Dashboard: http://localhost:5000/user_dashboard")
     print(f"  ML Model : {fraud_detector.config.get('best_model', 'not loaded')}")
     print("=" * 60)
-    app.run(debug=False, host="0.0.0.0", port=5000)
+    app.run(debug=True, host="0.0.0.0", port=5000, threaded=True, use_reloader=False)
