@@ -449,11 +449,60 @@ class AuthenticationSystem:
         conn.commit()
         conn.close()
 
-        # TODO: send email with reset link containing token
+        # Send reset email
+        try:
+            import smtplib
+            from email.mime.text import MIMEText
+            from email.mime.multipart import MIMEMultipart
+
+            SMTP_HOST     = 'smtp.gmail.com'
+            SMTP_PORT     = 587
+            SMTP_USERNAME = 'ericuwinezastarboy@gmail.com'
+            SMTP_PASSWORD = 'wagbvbyowxhbwrsg'
+
+            reset_link = f"http://localhost:5173/reset-password?token={token}"
+
+            msg = MIMEMultipart('alternative')
+            msg['Subject'] = ' MoMo Shield — Password Reset Request'
+            msg['From']    = f'MoMo Shield <{SMTP_USERNAME}>'
+            msg['To']      = email
+
+            html = f"""
+            <div style="font-family:Arial,sans-serif;max-width:500px;margin:auto;padding:30px;border:1px solid #e2e8f0;border-radius:12px;">
+              <h2 style="color:#10b981;"> MoMo Shield</h2>
+              <p>Hello,</p>
+              <p>We received a request to reset your password. Click the button below to set a new password:</p>
+              <a href="{reset_link}" style="display:inline-block;margin:20px 0;padding:12px 28px;background:linear-gradient(to right,#10b981,#0ea5e9);color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">
+                Reset My Password
+              </a>
+              <p style="color:#64748b;font-size:13px;">This link expires in <strong>1 hour</strong>. If you did not request this, ignore this email — your account is safe.</p>
+              <hr style="border:none;border-top:1px solid #e2e8f0;margin:20px 0;">
+              <p style="color:#94a3b8;font-size:11px;">MoMo Shield — AI-Powered Mobile Money Fraud Detection</p>
+            </div>
+            """
+
+            msg.attach(MIMEText(html, 'html'))
+
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+                server.ehlo()
+                server.starttls()
+                server.login(SMTP_USERNAME, SMTP_PASSWORD)
+                server.sendmail(SMTP_USERNAME, email, msg.as_string())
+
+            print(f"[Auth] Password reset email sent to {email}")
+
+        except Exception as e:
+            print(f"[Auth] Email send failed: {e}")
+            # Still return success — token is valid even if email failed
+            return {
+                "success": True,
+                "message": "Reset token generated but email delivery failed. Contact support.",
+                "debug_email_error": str(e)
+            }
+
         return {
             "success": True,
-            "message": "Reset token generated.",
-            "token"  : token   # remove in production; send via email instead
+            "message": "If that email is registered, a reset link has been sent."
         }
 
     def reset_password(self, token: str, new_password: str) -> dict:
@@ -467,7 +516,7 @@ class AuthenticationSystem:
 
         c.execute('''
             SELECT email FROM password_reset_tokens
-            WHERE token=%s AND expires_at > CURRENT_TIMESTAMP AND is_used=0
+            WHERE token=%s AND expires_at > CURRENT_TIMESTAMP AND is_used=FALSE
         ''', (token,))
         row = c.fetchone()
 
@@ -482,7 +531,7 @@ class AuthenticationSystem:
             UPDATE users SET password_hash=%s, salt=%s WHERE email=%s
         ''', (pw_hash, salt, email))
         c.execute('''
-            UPDATE password_reset_tokens SET is_used=1 WHERE token=%s
+            UPDATE password_reset_tokens SET is_used=TRUE WHERE token=%s
         ''', (token,))
         conn.commit()
         conn.close()
