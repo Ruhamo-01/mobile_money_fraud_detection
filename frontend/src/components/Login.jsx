@@ -283,7 +283,7 @@ export default function Login() {
       return;
     }
     try {
-      const r = await fetch(`${API}/api/forgot-password`, {
+      const r = await fetch(`${API}/api/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: forgotEmail })
