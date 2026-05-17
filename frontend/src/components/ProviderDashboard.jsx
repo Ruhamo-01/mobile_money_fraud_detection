@@ -15,7 +15,7 @@ const NavItem = ({ page, icon: Icon, label, badge, activePage, onNavigate }) => 
         : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'
     }`}
   >
-    <Icon className="w-4 h-4 flex-shrink-0" />
+    <Icon className="flex-shrink-0 w-4 h-4" />
     {label}
     {badge && (
       <span className="absolute right-2.5 top-1/2 -translate-y-1/2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
@@ -57,8 +57,8 @@ const AlertMsg = ({ msg }) => (
 );
 
 const StatCard = ({ value, label }) => (
-  <div className="bg-white border-2 border-slate-300 rounded-2xl p-6 shadow-lg text-center">
-    <div className="text-2xl font-bold font-mono text-emerald-500">{value}</div>
+  <div className="p-6 text-center bg-white border-2 shadow-lg border-slate-300 rounded-2xl">
+    <div className="font-mono text-2xl font-bold text-emerald-500">{value}</div>
     <div className="text-xs text-slate-500 mt-1.5">{label}</div>
   </div>
 );
@@ -324,14 +324,14 @@ export default function ProviderDashboard() {
           <div className="w-12 h-12 rounded-full bg-gradient-to-br from-emerald-500 to-sky-500 text-white flex items-center justify-center text-xl font-bold mx-auto mb-2.5">
             SP
           </div>
-          <div className="font-bold text-sm bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text text-transparent">
+          <div className="text-sm font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
             MoMo Shield
           </div>
-          <div className="text-[11px] text-slate-500 mt-1">Admin Dashboard</div>
+          <div className="text-[11px] text-slate-500 mt-1">Manager's Dashboard</div>
         </div>
         
         <div className="p-3.5 border-b border-slate-300 text-center">
-          <div className="text-xs font-semibold">Service Provider</div>
+          <div className="text-xs font-semibold">Manager</div>
           <div className="text-[11px] text-slate-500 mt-2 bg-emerald-500/8 border border-emerald-500/20 rounded-lg py-2 px-3 font-mono font-semibold text-emerald-500">
             System Access
           </div>
@@ -357,15 +357,15 @@ export default function ProviderDashboard() {
       </aside>
       
       {/* Main Content */}
-      <main className="flex-1 flex flex-col relative z-5 h-screen overflow-y-auto p-6">
+      <main className="relative flex flex-col flex-1 h-screen p-6 overflow-y-auto z-5">
         {/* Overview Page */}
         {activePage === 'overview' && (
           <div>
-            <div className="text-center mb-6">
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text text-transparent">
+            <div className="mb-6 text-center">
+              <h1 className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
                 System Overview
               </h1>
-              <p className="text-sm text-slate-500 mt-1">Real-time fraud protection statistics</p>
+              <p className="mt-1 text-sm text-slate-500">Real-time fraud protection statistics</p>
             </div>
             
             <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-5 mb-6">
@@ -381,7 +381,7 @@ export default function ProviderDashboard() {
             
             <div className="grid grid-cols-2 gap-6">
               <Card>
-                <div className="p-6 border-b border-slate-300 flex flex-col items-center text-center">
+                <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-red-500 to-amber-500 flex items-center justify-center mb-2.5">
                     <AlertTriangle className="w-5 h-5 text-white" />
                   </div>
@@ -389,7 +389,7 @@ export default function ProviderDashboard() {
                 </div>
                 <div className="p-0">
                   {alerts.length === 0 ? (
-                    <div className="text-center text-slate-500 p-10 text-sm">No alerts</div>
+                    <div className="p-10 text-sm text-center text-slate-500">No alerts</div>
                   ) : (
                     alerts.map((alert) => (
                       <div key={alert.id} className="flex items-start gap-3 p-4 border-b border-slate-300">
@@ -420,7 +420,7 @@ export default function ProviderDashboard() {
               {/* Transaction History */}
 {lookupResult && (
   <Card>
-    <div className="p-6 border-b border-slate-300 flex flex-col items-center text-center">
+    <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
       <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-sky-500 to-indigo-500 flex items-center justify-center mb-2.5">
         <ArrowUpRight className="w-5 h-5 text-white" />
       </div>
@@ -428,12 +428,12 @@ export default function ProviderDashboard() {
     </div>
     <div className="p-0">
       {lookupTransactions.length === 0 ? (
-        <div className="text-center text-slate-500 p-8 text-sm">No transactions found</div>
+        <div className="p-8 text-sm text-center text-slate-500">No transactions found</div>
       ) : (
         lookupTransactions.map((tx, i) => {
           const isSent = tx.sender_phone === ('+250' + lookupPhone);
           return (
-            <div key={tx.id ?? i} className="flex items-center gap-3 p-4 border-b border-slate-200 text-xs">
+            <div key={tx.id ?? i} className="flex items-center gap-3 p-4 text-xs border-b border-slate-200">
               <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
                 isSent ? 'bg-rose-500/10 text-rose-500' : 'bg-emerald-500/10 text-emerald-500'
               }`}>
@@ -464,7 +464,7 @@ export default function ProviderDashboard() {
 {/* Fraud Alerts for this user */}
 {lookupResult && (
   <Card>
-    <div className="p-6 border-b border-slate-300 flex flex-col items-center text-center">
+    <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
       <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-red-500 to-amber-500 flex items-center justify-center mb-2.5">
         <ShieldAlert className="w-5 h-5 text-white" />
       </div>
@@ -472,7 +472,7 @@ export default function ProviderDashboard() {
     </div>
     <div className="p-0">
       {lookupFraudAlerts.length === 0 ? (
-        <div className="text-center text-slate-500 p-8 text-sm">No fraud alerts for this user</div>
+        <div className="p-8 text-sm text-center text-slate-500">No fraud alerts for this user</div>
       ) : (
         lookupFraudAlerts.map((alert, i) => (
           <div key={alert.id ?? i} className="flex items-start gap-3 p-4 border-b border-slate-200">
@@ -502,7 +502,7 @@ export default function ProviderDashboard() {
 )}
               
               <Card>
-                <div className="p-6 border-b border-slate-300 flex flex-col items-center text-center">
+                <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-sky-500 flex items-center justify-center mb-2.5">
                     <RefreshCw className="w-5 h-5 text-white" />
                   </div>
@@ -511,11 +511,11 @@ export default function ProviderDashboard() {
                 <div className="p-6">
                   <div className="flex justify-between py-3 border-b border-slate-200">
                     <span className="text-xs text-slate-500">Model</span>
-                    <span className="text-xs font-semibold font-mono">{stats.ml_model || 'Loading…'}</span>
+                    <span className="font-mono text-xs font-semibold">{stats.ml_model || 'Loading…'}</span>
                   </div>
                   <div className="flex justify-between py-3 border-b border-slate-200">
                     <span className="text-xs text-slate-500">Threshold</span>
-                    <span className="text-xs font-semibold font-mono">{stats.threshold || '—'}</span>
+                    <span className="font-mono text-xs font-semibold">{stats.threshold || '—'}</span>
                   </div>
                   <div className="flex justify-between py-3">
                     <span className="text-xs text-slate-500">Status</span>
@@ -530,14 +530,14 @@ export default function ProviderDashboard() {
         {/* Alerts Page */}
         {activePage === 'alerts' && (
           <div>
-            <div className="text-center mb-6">
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text text-transparent">
+            <div className="mb-6 text-center">
+              <h1 className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
                 Fraud Alerts
               </h1>
-              <p className="text-sm text-slate-500 mt-1">Unacknowledged fraud detection alerts</p>
+              <p className="mt-1 text-sm text-slate-500">Unacknowledged fraud detection alerts</p>
             </div>
             <Card>
-              <div className="p-6 border-b border-slate-300 flex flex-col items-center text-center">
+              <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
                 <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-red-500 to-amber-500 flex items-center justify-center mb-2.5">
                   <AlertTriangle className="w-5 h-5 text-white" />
                 </div>
@@ -545,7 +545,7 @@ export default function ProviderDashboard() {
               </div>
               <div className="p-0">
                 {alerts.length === 0 ? (
-                  <div className="text-center text-slate-500 p-10 text-sm">No alerts</div>
+                  <div className="p-10 text-sm text-center text-slate-500">No alerts</div>
                 ) : (
                   alerts.map((alert) => (
                     <div key={alert.id} className="flex items-start gap-3 p-4 border-b border-slate-300">
@@ -578,16 +578,16 @@ export default function ProviderDashboard() {
         {/* User Lookup Page */}
         {activePage === 'user-lookup' && (
   <div>
-    <div className="text-center mb-6">
-      <h1 className="text-2xl font-bold bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text text-transparent">
+    <div className="mb-6 text-center">
+      <h1 className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
         User Lookup
       </h1>
-      <p className="text-sm text-slate-500 mt-1">Search user by phone number</p>
+      <p className="mt-1 text-sm text-slate-500">Search user by phone number</p>
     </div>
     
     <div className="max-w-[600px] mx-auto">
       <Card>
-        <div className="p-6 border-b border-slate-300 flex flex-col items-center text-center">
+        <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
           <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-sky-500 flex items-center justify-center mb-2.5">
             <Search className="w-5 h-5 text-white" />
           </div>
@@ -597,7 +597,7 @@ export default function ProviderDashboard() {
           <AlertMsg msg={lookupMsg} />
           <div className="mb-5">
             <label className="block text-xs font-semibold text-slate-900 mb-1.5">User Phone Number</label>
-            <div className="flex items-center border border-slate-300 rounded-lg bg-slate-50 focus-within:border-emerald-500 focus-within:ring-3 focus-within:ring-emerald-500/10">
+            <div className="flex items-center border rounded-lg border-slate-300 bg-slate-50 focus-within:border-emerald-500 focus-within:ring-3 focus-within:ring-emerald-500/10">
               <span className="px-3.5 py-2.5 text-slate-500 font-mono text-sm border-r border-slate-300">+250</span>
               <input
                 type="text"
@@ -609,7 +609,7 @@ export default function ProviderDashboard() {
               />
             </div>
           </div>
-          <Button onClick={lookupUser} disabled={lookupLoading} className="w-full justify-center">
+          <Button onClick={lookupUser} disabled={lookupLoading} className="justify-center w-full">
             <Search className="w-4 h-4" />
             {lookupLoading ? 'Looking up...' : 'Search User'}
           </Button>
@@ -618,32 +618,32 @@ export default function ProviderDashboard() {
       
       {lookupResult && (
         <Card>
-          <div className="p-6 border-b border-slate-300 flex flex-col items-center text-center">
+          <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-sky-500 flex items-center justify-center mb-2.5">
               <Users className="w-5 h-5 text-white" />
             </div>
             <h2 className="text-base font-semibold">User Details</h2>
           </div>
           <div className="p-6">
-            <div className="flex justify-between py-3 border-b border-slate-200 text-xs">
+            <div className="flex justify-between py-3 text-xs border-b border-slate-200">
               <span className="text-slate-500">Name</span>
-              <span className="font-semibold font-mono">{lookupResult.name || '—'}</span>
+              <span className="font-mono font-semibold">{lookupResult.name || '—'}</span>
             </div>
-            <div className="flex justify-between py-3 border-b border-slate-200 text-xs">
+            <div className="flex justify-between py-3 text-xs border-b border-slate-200">
               <span className="text-slate-500">Phone</span>
-              <span className="font-semibold font-mono">{lookupResult.phone || '—'}</span>
+              <span className="font-mono font-semibold">{lookupResult.phone || '—'}</span>
             </div>
-            <div className="flex justify-between py-3 border-b border-slate-200 text-xs">
+            <div className="flex justify-between py-3 text-xs border-b border-slate-200">
               <span className="text-slate-500">Email</span>
-              <span className="font-semibold font-mono">{lookupResult.email || '—'}</span>
+              <span className="font-mono font-semibold">{lookupResult.email || '—'}</span>
             </div>
-            <div className="flex justify-between py-3 border-b border-slate-200 text-xs">
+            <div className="flex justify-between py-3 text-xs border-b border-slate-200">
               <span className="text-slate-500">Balance</span>
-              <span className="font-semibold font-mono">{fmtRWF(lookupResult.balance || 0)}</span>
+              <span className="font-mono font-semibold">{fmtRWF(lookupResult.balance || 0)}</span>
             </div>
             <div className="flex justify-between py-3 text-xs">
               <span className="text-slate-500">Status</span>
-              <span className="font-semibold font-mono">{lookupResult.is_active ? 'Active' : 'Inactive'}</span>
+              <span className="font-mono font-semibold">{lookupResult.is_active ? 'Active' : 'Inactive'}</span>
             </div>
           </div>
         </Card>
@@ -652,7 +652,7 @@ export default function ProviderDashboard() {
       {/* Transaction History */}
       {lookupResult && (
         <Card>
-          <div className="p-6 border-b border-slate-300 flex flex-col items-center text-center">
+          <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-sky-500 to-indigo-500 flex items-center justify-center mb-2.5">
               <ArrowUpRight className="w-5 h-5 text-white" />
             </div>
@@ -660,12 +660,12 @@ export default function ProviderDashboard() {
           </div>
           <div className="p-0">
             {lookupTransactions.length === 0 ? (
-              <div className="text-center text-slate-500 p-8 text-sm">No transactions found</div>
+              <div className="p-8 text-sm text-center text-slate-500">No transactions found</div>
             ) : (
               lookupTransactions.map((tx, i) => {
                 const isSent = tx.sender_phone === ('+250' + lookupPhone);
                 return (
-                  <div key={tx.id ?? i} className="flex items-center gap-3 p-4 border-b border-slate-200 text-xs">
+                  <div key={tx.id ?? i} className="flex items-center gap-3 p-4 text-xs border-b border-slate-200">
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
                       isSent ? 'bg-rose-500/10 text-rose-500' : 'bg-emerald-500/10 text-emerald-500'
                     }`}>
@@ -696,7 +696,7 @@ export default function ProviderDashboard() {
       {/* Fraud Alerts for this user */}
       {lookupResult && (
         <Card>
-          <div className="p-6 border-b border-slate-300 flex flex-col items-center text-center">
+          <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-red-500 to-amber-500 flex items-center justify-center mb-2.5">
               <ShieldAlert className="w-5 h-5 text-white" />
             </div>
@@ -704,7 +704,7 @@ export default function ProviderDashboard() {
           </div>
           <div className="p-0">
             {lookupFraudAlerts.length === 0 ? (
-              <div className="text-center text-slate-500 p-8 text-sm">No fraud alerts for this user</div>
+              <div className="p-8 text-sm text-center text-slate-500">No fraud alerts for this user</div>
             ) : (
               lookupFraudAlerts.map((alert, i) => (
                 <div key={alert.id ?? i} className="flex items-start gap-3 p-4 border-b border-slate-200">
@@ -739,14 +739,14 @@ export default function ProviderDashboard() {
         {/* All Users Page */}
         {activePage === 'users' && (
           <div>
-            <div className="text-center mb-6">
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text text-transparent">
+            <div className="mb-6 text-center">
+              <h1 className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
                 All Users
               </h1>
-              <p className="text-sm text-slate-500 mt-1">System user management</p>
+              <p className="mt-1 text-sm text-slate-500">System user management</p>
             </div>
             <Card>
-              <div className="p-6 border-b border-slate-300 flex flex-col items-center text-center">
+              <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
                 <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500 to-sky-500 flex items-center justify-center mb-2.5">
                   <Users className="w-5 h-5 text-white" />
                 </div>
@@ -754,16 +754,16 @@ export default function ProviderDashboard() {
               </div>
               <div className="p-0">
                 {users.length === 0 ? (
-                  <div className="text-center text-slate-500 p-10 text-sm">Loading users...</div>
+                  <div className="p-10 text-sm text-center text-slate-500">Loading users...</div>
                 ) : (
                   users.map((user) => (
-                    <div key={user.phone_number} className="flex justify-between items-center p-4 border-b border-slate-300 text-xs">
+                    <div key={user.phone_number} className="flex items-center justify-between p-4 text-xs border-b border-slate-300">
                       <div>
                         <div className="font-semibold">{user.full_name || '—'}</div>
-                        <div className="text-slate-500 font-mono">{user.phone_number || '—'}</div>
+                        <div className="font-mono text-slate-500">{user.phone_number || '—'}</div>
                       </div>
                       <div className="text-right">
-                        <div className="font-semibold font-mono">{fmtRWF(user.account_balance || 0)}</div>
+                        <div className="font-mono font-semibold">{fmtRWF(user.account_balance || 0)}</div>
                         <div className="text-slate-500">{user.is_active ? 'Active' : 'Inactive'}</div>
                       </div>
                     </div>
@@ -777,16 +777,16 @@ export default function ProviderDashboard() {
         {/* Travel Control Page */}
         {activePage === 'travel' && (
           <div>
-            <div className="text-center mb-6">
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text text-transparent">
+            <div className="mb-6 text-center">
+              <h1 className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
                 Travel Control
               </h1>
-              <p className="text-sm text-slate-500 mt-1">Manage user travel registrations and SIM blocking</p>
+              <p className="mt-1 text-sm text-slate-500">Manage user travel registrations and SIM blocking</p>
             </div>
             
             <div className="grid grid-cols-2 gap-6">
               <Card>
-                <div className="p-6 border-b border-slate-300 flex flex-col items-center text-center">
+                <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-500 to-red-500 flex items-center justify-center mb-2.5">
                     <Send className="w-5 h-5 text-white" />
                   </div>
@@ -797,7 +797,7 @@ export default function ProviderDashboard() {
                   <AlertMsg msg={travelMsg} />
                   <div className="mb-5">
                     <label className="block text-xs font-semibold text-slate-900 mb-1.5">Phone Number</label>
-                    <div className="flex items-center border border-slate-300 rounded-lg bg-slate-50 focus-within:border-emerald-500 focus-within:ring-3 focus-within:ring-emerald-500/10">
+                    <div className="flex items-center border rounded-lg border-slate-300 bg-slate-50 focus-within:border-emerald-500 focus-within:ring-3 focus-within:ring-emerald-500/10">
                       <span className="px-3.5 py-2.5 text-slate-500 font-mono text-sm border-r border-slate-300">+250</span>
                       <input
                         type="text"
@@ -839,7 +839,7 @@ export default function ProviderDashboard() {
                       className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg bg-slate-50 text-sm focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/10 outline-none"
                     />
                   </div>
-                  <Button onClick={registerTravel} className="w-full justify-center">
+                  <Button onClick={registerTravel} className="justify-center w-full">
                     <Send className="w-4 h-4" />
                     Block SIM & Register Travel
                   </Button>
@@ -847,7 +847,7 @@ export default function ProviderDashboard() {
               </Card>
               
               <Card>
-                <div className="p-6 border-b border-slate-300 flex flex-col items-center text-center">
+                <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-sky-500 flex items-center justify-center mb-2.5">
                     <RefreshCw className="w-5 h-5 text-white" />
                   </div>
@@ -858,7 +858,7 @@ export default function ProviderDashboard() {
                   <AlertMsg msg={reactMsg} />
                   <div className="mb-5">
                     <label className="block text-xs font-semibold text-slate-900 mb-1.5">Phone Number</label>
-                    <div className="flex items-center border border-slate-300 rounded-lg bg-slate-50 focus-within:border-emerald-500 focus-within:ring-3 focus-within:ring-emerald-500/10">
+                    <div className="flex items-center border rounded-lg border-slate-300 bg-slate-50 focus-within:border-emerald-500 focus-within:ring-3 focus-within:ring-emerald-500/10">
                       <span className="px-3.5 py-2.5 text-slate-500 font-mono text-sm border-r border-slate-300">+250</span>
                       <input
                         type="text"
@@ -870,14 +870,14 @@ export default function ProviderDashboard() {
                       />
                     </div>
                   </div>
-                  <Button onClick={reactivateSim} className="w-full justify-center mb-5">
+                  <Button onClick={reactivateSim} className="justify-center w-full mb-5">
                     <Home className="w-4 h-4" />
                     Confirm Return & Re-enable SIM
                   </Button>
-                  <hr className="border-slate-300 my-5" />
+                  <hr className="my-5 border-slate-300" />
                   <div className="mb-5">
                     <label className="block text-xs font-semibold text-slate-900 mb-1.5">Check Travel Status</label>
-                    <div className="flex items-center border border-slate-300 rounded-lg bg-slate-50 focus-within:border-emerald-500 focus-within:ring-3 focus-within:ring-emerald-500/10">
+                    <div className="flex items-center border rounded-lg border-slate-300 bg-slate-50 focus-within:border-emerald-500 focus-within:ring-3 focus-within:ring-emerald-500/10">
                       <span className="px-3.5 py-2.5 text-slate-500 font-mono text-sm border-r border-slate-300">+250</span>
                       <input
                         type="text"
@@ -889,7 +889,7 @@ export default function ProviderDashboard() {
                       />
                     </div>
                   </div>
-                  <Button variant="ghost" onClick={checkTravel} className="w-full justify-center">Check Status</Button>
+                  <Button variant="ghost" onClick={checkTravel} className="justify-center w-full">Check Status</Button>
                   {travelStatus && (
                     <div className="mt-3 p-2.5 rounded-lg text-xs bg-sky-500/10 text-sky-500 border border-sky-500/20">
                       {JSON.stringify(travelStatus)}

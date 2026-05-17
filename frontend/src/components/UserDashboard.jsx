@@ -15,7 +15,7 @@ const NavItem = ({ page, activePage, setActivePage, icon: Icon, label }) => (
         : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'
     }`}
   >
-    <Icon className="w-4 h-4 flex-shrink-0" />
+    <Icon className="flex-shrink-0 w-4 h-4" />
     {label}
   </button>
 );
@@ -605,17 +605,17 @@ export default function UserDashboard() {
     <div className="flex min-h-screen bg-white">
       {/* Sidebar */}
       <aside className="w-[230px] flex-shrink-0 bg-white border-2 border-slate-300 rounded-2xl m-4 h-[calc(100vh-32px)] flex flex-col relative z-10 overflow-hidden shadow-lg">
-        <div className="p-4 border-b border-slate-300 text-center">
-          <div className="w-14 h-14 rounded-full bg-gradient-to-br from-emerald-500 to-sky-500 text-white flex items-center justify-center text-xl font-bold mx-auto mb-2">
+        <div className="p-4 text-center border-b border-slate-300">
+          <div className="flex items-center justify-center mx-auto mb-2 text-xl font-bold text-white rounded-full w-14 h-14 bg-gradient-to-br from-emerald-500 to-sky-500">
             {initials}
           </div>
-          <div className="font-bold text-sm bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text text-transparent leading-tight">
+          <div className="text-sm font-bold leading-tight text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
             MoMo Shield
           </div>
           <div className="text-[10px] text-slate-400 leading-tight mb-2">User Dashboard</div>
           {currentUser && (
             <>
-              <div className="text-xs font-semibold text-slate-800 leading-tight">{currentUser.name}</div>
+              <div className="text-xs font-semibold leading-tight text-slate-800">{currentUser.name}</div>
               <div className="text-[10px] text-slate-500 font-mono leading-tight">{currentUser.phone}</div>
             </>
           )}
@@ -638,26 +638,26 @@ export default function UserDashboard() {
       </aside>
       
       {/* Main Content */}
-      <main className="flex-1 flex flex-col relative z-5 h-screen overflow-y-auto p-6">
+      <main className="relative flex flex-col flex-1 h-screen p-6 overflow-y-auto z-5">
         {/* Balance Page */}
         {activePage === 'balance' && (
           <div>
-            <div className="text-center mb-6">
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text text-transparent">
+            <div className="mb-6 text-center">
+              <h1 className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
                 My Balance
               </h1>
-              <p className="text-sm text-slate-500 mt-1">Account overview and quick actions</p>
+              <p className="mt-1 text-sm text-slate-500">Account overview and quick actions</p>
             </div>
             
             <div className="grid grid-cols-2 gap-5">
               <Card>
-                <div className="p-6 border-b border-slate-300 flex flex-col items-center text-center">
+                <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-sky-500 flex items-center justify-center mb-2.5">
                     <Wallet className="w-5 h-5 text-white" />
                   </div>
                   <h2 className="text-base font-semibold">Account Balance</h2>
                 </div>
-                <div className="p-9 text-center">
+                <div className="text-center p-9">
                   <div className="text-[2.4rem] font-bold font-mono text-emerald-500">{fmtRWF(balance)}</div>
                   <div className="text-xs text-slate-500 mt-1.5">Rwanda Francs</div>
                   <div className="mt-6">
@@ -667,7 +667,7 @@ export default function UserDashboard() {
               </Card>
               
               <Card>
-                <div className="p-6 border-b border-slate-300 flex flex-col items-center text-center">
+                <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500 to-sky-500 flex items-center justify-center mb-2.5">
                     <History className="w-5 h-5 text-white" />
                   </div>
@@ -675,10 +675,10 @@ export default function UserDashboard() {
                 </div>
                 <div className="p-0">
                   {transactions.length === 0 ? (
-                    <div className="text-center text-slate-500 p-10 text-sm">No recent transactions</div>
+                    <div className="p-10 text-sm text-center text-slate-500">No recent transactions</div>
                   ) : (
                     transactions.slice(0, 5).map((tx) => (
-                      <div key={tx.id} className="flex justify-between items-center p-4 border-b border-slate-300 text-xs">
+                      <div key={tx.id} className="flex items-center justify-between p-4 text-xs border-b border-slate-300">
                         <div>
                           <div className="font-semibold">{tx.direction === 'sent' ? '→ ' + (tx.recipient_phone || tx.recipient || '—') : '← ' + (tx.sender_phone || tx.sender || '—')}</div>
                           <div className="text-slate-500">{fmtDate(tx.created_at)}</div>
@@ -700,16 +700,16 @@ export default function UserDashboard() {
         {/* Transfer Page */}
         {activePage === 'transfer' && (
           <div>
-            <div className="text-center mb-6">
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text text-transparent">
+            <div className="mb-6 text-center">
+              <h1 className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
                 Send Money
               </h1>
-              <p className="text-sm text-slate-500 mt-1">Secure transfer with real-time fraud protection</p>
+              <p className="mt-1 text-sm text-slate-500">Secure transfer with real-time fraud protection</p>
             </div>
             
             <div className="max-w-[480px] mx-auto">
               <Card>
-                <div className="p-6 border-b border-slate-300 flex flex-col items-center text-center">
+                <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-sky-500 flex items-center justify-center mb-2.5">
                     <Send className="w-5 h-5 text-white" />
                   </div>
@@ -720,7 +720,7 @@ export default function UserDashboard() {
                   
                   <div className="mb-5">
                     <label className="block text-xs font-semibold text-slate-900 mb-1.5">Recipient Phone</label>
-                    <div className="flex items-center border border-slate-300 rounded-lg bg-slate-50 focus-within:border-emerald-500 focus-within:ring-3 focus-within:ring-emerald-500/10">
+                    <div className="flex items-center border rounded-lg border-slate-300 bg-slate-50 focus-within:border-emerald-500 focus-within:ring-3 focus-within:ring-emerald-500/10">
                       <span className="px-3.5 py-2.5 text-slate-500 font-mono text-sm border-r border-slate-300">+250</span>
                       <input
                         type="text"
@@ -759,7 +759,7 @@ export default function UserDashboard() {
                   </div>
                   
                   {transferAmount && (
-                    <div className="mb-5 bg-slate-50 border border-slate-300 rounded-lg p-4 text-xs">
+                    <div className="p-4 mb-5 text-xs border rounded-lg bg-slate-50 border-slate-300">
                       <div className="flex justify-between py-1">
                         <span>Amount</span>
                         <span>{fmtRWF(parseFloat(transferAmount) || 0)}</span>
@@ -768,14 +768,14 @@ export default function UserDashboard() {
                         <span>Fee</span>
                         <span>{fmtRWF(fee)}</span>
                       </div>
-                      <div className="flex justify-between py-1 border-t border-slate-300 mt-1 pt-1 font-bold">
+                      <div className="flex justify-between py-1 pt-1 mt-1 font-bold border-t border-slate-300">
                         <span>Total deducted</span>
                         <span>{fmtRWF((parseFloat(transferAmount) || 0) + fee)}</span>
                       </div>
                     </div>
                   )}
                   
-                  <Button onClick={doTransfer} className="w-full justify-center">
+                  <Button onClick={doTransfer} className="justify-center w-full">
                     <Send className="w-4 h-4" />
                     Send Money
                   </Button>
@@ -788,14 +788,14 @@ export default function UserDashboard() {
         {/* History Page */}
         {activePage === 'history' && (
           <div>
-            <div className="text-center mb-6">
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text text-transparent">
+            <div className="mb-6 text-center">
+              <h1 className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
                 Transaction History
               </h1>
-              <p className="text-sm text-slate-500 mt-1">Your recent money transfers</p>
+              <p className="mt-1 text-sm text-slate-500">Your recent money transfers</p>
             </div>
             <Card>
-              <div className="p-6 border-b border-slate-300 flex flex-col items-center text-center">
+              <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
                 <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500 to-sky-500 flex items-center justify-center mb-2.5">
                   <History className="w-5 h-5 text-white" />
                 </div>
@@ -803,10 +803,10 @@ export default function UserDashboard() {
               </div>
               <div className="p-0">
                 {history.length === 0 ? (
-                  <div className="text-center text-slate-500 p-10 text-sm">No transactions yet</div>
+                  <div className="p-10 text-sm text-center text-slate-500">No transactions yet</div>
                 ) : (
                   history.map((tx) => (
-                    <div key={tx.id} className="flex justify-between items-center p-4 border-b border-slate-300 text-xs">
+                    <div key={tx.id} className="flex items-center justify-between p-4 text-xs border-b border-slate-300">
                       <div>
                         <div className="font-semibold">{tx.direction === 'sent' ? '→ ' + (tx.recipient || tx.recipient_phone || '—') : '← ' + (tx.sender_phone || '—')}</div>
                         <div className="text-slate-500">{fmtDate(tx.created_at)}</div>
@@ -831,41 +831,41 @@ export default function UserDashboard() {
         {/* Profile Page */}
         {activePage === 'profile' && (
           <div>
-            <div className="text-center mb-6">
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text text-transparent">
+            <div className="mb-6 text-center">
+              <h1 className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
                 My Profile
               </h1>
-              <p className="text-sm text-slate-500 mt-1">Account information and settings</p>
+              <p className="mt-1 text-sm text-slate-500">Account information and settings</p>
             </div>
             
             <div className="max-w-[600px] mx-auto">
               <Card>
-                <div className="p-6 border-b border-slate-300 flex flex-col items-center text-center">
+                <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-sky-500 flex items-center justify-center mb-2.5">
                     <User className="w-5 h-5 text-white" />
                   </div>
                   <h2 className="text-base font-semibold">Account Details</h2>
                 </div>
                 <div className="p-6">
-                  <div className="flex justify-between py-3 border-b border-slate-200 text-xs">
+                  <div className="flex justify-between py-3 text-xs border-b border-slate-200">
                     <span className="text-slate-500">Full Name</span>
-                    <span className="font-semibold font-mono">{profile?.name || '—'}</span>
+                    <span className="font-mono font-semibold">{profile?.name || '—'}</span>
                   </div>
-                  <div className="flex justify-between py-3 border-b border-slate-200 text-xs">
+                  <div className="flex justify-between py-3 text-xs border-b border-slate-200">
                     <span className="text-slate-500">Phone Number</span>
-                    <span className="font-semibold font-mono">{profile?.phone || '—'}</span>
+                    <span className="font-mono font-semibold">{profile?.phone || '—'}</span>
                   </div>
-                  <div className="flex justify-between py-3 border-b border-slate-200 text-xs">
+                  <div className="flex justify-between py-3 text-xs border-b border-slate-200">
                     <span className="text-slate-500">Email</span>
-                    <span className="font-semibold font-mono">{profile?.email || '—'}</span>
+                    <span className="font-mono font-semibold">{profile?.email || '—'}</span>
                   </div>
-                  <div className="flex justify-between py-3 border-b border-slate-200 text-xs">
+                  <div className="flex justify-between py-3 text-xs border-b border-slate-200">
                     <span className="text-slate-500">National ID</span>
-                    <span className="font-semibold font-mono">{profile?.national_id || '—'}</span>
+                    <span className="font-mono font-semibold">{profile?.national_id || '—'}</span>
                   </div>
                   <div className="flex justify-between py-3 text-xs">
                     <span className="text-slate-500">Account Status</span>
-                    <span className="font-semibold font-mono">Active</span>
+                    <span className="font-mono font-semibold">Active</span>
                   </div>
                 </div>
               </Card>
@@ -876,16 +876,16 @@ export default function UserDashboard() {
         {/* Reset PIN Page */}
         {activePage === 'reset-pin' && (
           <div>
-            <div className="text-center mb-6">
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text text-transparent">
+            <div className="mb-6 text-center">
+              <h1 className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
                 Reset PIN
               </h1>
-              <p className="text-sm text-slate-500 mt-1">Verify your identity to reset your transaction PIN</p>
+              <p className="mt-1 text-sm text-slate-500">Verify your identity to reset your transaction PIN</p>
             </div>
             
             <div className="max-w-[480px] mx-auto">
               <Card>
-                <div className="p-6 border-b border-slate-300 flex flex-col items-center text-center">
+                <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-500 to-red-500 flex items-center justify-center mb-2.5">
                     <Lock className="w-5 h-5 text-white" />
                   </div>
@@ -919,7 +919,7 @@ export default function UserDashboard() {
                           className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg bg-slate-50 text-sm focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/10 outline-none"
                         />
                       </div>
-                      <Button onClick={rpVerifyIdentity} className="w-full justify-center">
+                      <Button onClick={rpVerifyIdentity} className="justify-center w-full">
                         <Check className="w-4 h-4" />
                         Verify Identity
                       </Button>
@@ -930,7 +930,7 @@ export default function UserDashboard() {
                     <div>
                       <p className="text-xs text-slate-500 mb-3.5 text-center">
                         <strong>Step 2 of 3</strong> — Set your new PIN
-                        {resetVerifiedName && <span className="block text-emerald-500 font-semibold mt-1">{resetVerifiedName}</span>}
+                        {resetVerifiedName && <span className="block mt-1 font-semibold text-emerald-500">{resetVerifiedName}</span>}
                       </p>
                       <div className="mb-5">
                         <label className="block text-xs font-semibold text-slate-900 mb-1.5">New PIN (4–6 digits)</label>
@@ -954,7 +954,7 @@ export default function UserDashboard() {
                           className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg bg-slate-50 text-sm focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/10 outline-none"
                         />
                       </div>
-                      <Button onClick={() => setResetStep(3)} disabled={!resetNewPin || resetNewPin !== resetConfirmPin} className="w-full justify-center">
+                      <Button onClick={() => setResetStep(3)} disabled={!resetNewPin || resetNewPin !== resetConfirmPin} className="justify-center w-full">
                         Continue
                       </Button>
                     </div>
@@ -965,7 +965,7 @@ export default function UserDashboard() {
                       <p className="text-xs text-slate-500 mb-3.5 text-center"><strong>Step 3 of 3</strong> — Scan your face to confirm</p>
                       <div className="rounded-xl overflow-hidden bg-black mb-2.5 min-h-[140px] flex items-center justify-center relative">
                         <video ref={resetFaceVideoRef} autoPlay playsInline className="w-full max-h-[200px] hidden transform -scale-x-100" />
-                        <canvas ref={resetFaceCanvasRef} className="hidden absolute invisible w-0 h-0" />
+                        <canvas ref={resetFaceCanvasRef} className="absolute invisible hidden w-0 h-0" />
                         {resetFaceCaptured && resetFaceBase64 && (
                           <img src={`data:image/jpeg;base64,${resetFaceBase64}`} alt="Face capture" className="w-full max-h-[200px] object-cover" />
                         )}
@@ -978,25 +978,25 @@ export default function UserDashboard() {
                       </div>
                       <div className="flex gap-2.5 mb-2.5">
                         {!resetStream && !resetFaceCaptured && (
-                          <Button onClick={resetStartCamera} className="flex-1 justify-center">
+                          <Button onClick={resetStartCamera} className="justify-center flex-1">
                             <Camera className="w-4 h-4" />
                             Open Camera
                           </Button>
                         )}
                         {resetStream && !resetFaceCaptured && (
-                          <Button onClick={resetCaptureFace} className="flex-1 justify-center">
+                          <Button onClick={resetCaptureFace} className="justify-center flex-1">
                             <Check className="w-4 h-4" />
                             Capture Face
                           </Button>
                         )}
                         {resetFaceCaptured && (
-                          <Button variant="ghost" onClick={resetRetake} className="flex-1 justify-center">
+                          <Button variant="ghost" onClick={resetRetake} className="justify-center flex-1">
                             <RefreshCw className="w-4 h-4" />
                             Retake
                           </Button>
                         )}
                       </div>
-                      <Button onClick={doResetPin} disabled={!resetFaceValid} className="w-full justify-center">
+                      <Button onClick={doResetPin} disabled={!resetFaceValid} className="justify-center w-full">
                         <Lock className="w-4 h-4" />
                         Reset PIN
                       </Button>
@@ -1011,16 +1011,16 @@ export default function UserDashboard() {
         {/* Update Face Page */}
         {activePage === 'update-face' && (
           <div>
-            <div className="text-center mb-6">
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text text-transparent">
+            <div className="mb-6 text-center">
+              <h1 className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
                 Update Face
               </h1>
-              <p className="text-sm text-slate-500 mt-1">Verify your identity then register a new face scan</p>
+              <p className="mt-1 text-sm text-slate-500">Verify your identity then register a new face scan</p>
             </div>
             
             <div className="max-w-[480px] mx-auto">
               <Card>
-                <div className="p-6 border-b border-slate-300 flex flex-col items-center text-center">
+                <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-sky-500 flex items-center justify-center mb-2.5">
                     <User className="w-5 h-5 text-white" />
                   </div>
@@ -1054,7 +1054,7 @@ export default function UserDashboard() {
                           className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg bg-slate-50 text-sm focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/10 outline-none"
                         />
                       </div>
-                      <Button onClick={ufVerifyIdentity} className="w-full justify-center">
+                      <Button onClick={ufVerifyIdentity} className="justify-center w-full">
                         <Check className="w-4 h-4" />
                         Verify Identity
                       </Button>
@@ -1065,12 +1065,12 @@ export default function UserDashboard() {
                     <div>
                       <p className="text-xs text-slate-500 mb-3.5 text-center">
                         <strong>Step 2 of 2</strong> — Scan your face
-                        {updateVerifiedName && <span className="block text-emerald-500 font-semibold mt-1">{updateVerifiedName}</span>}
+                        {updateVerifiedName && <span className="block mt-1 font-semibold text-emerald-500">{updateVerifiedName}</span>}
                       </p>
                       <p className="text-xs text-slate-500 mb-2.5">Your new face must match the face already on this account. Eyes, nose, mouth and chin must be clearly visible.</p>
                       <div className="rounded-xl overflow-hidden bg-black mb-2.5 min-h-[140px] flex items-center justify-center relative">
                         <video ref={updateFaceVideoRef} autoPlay playsInline className="w-full max-h-[200px] hidden transform -scale-x-100" />
-                        <canvas ref={updateFaceCanvasRef} className="hidden absolute invisible w-0 h-0" />
+                        <canvas ref={updateFaceCanvasRef} className="absolute invisible hidden w-0 h-0" />
                         {updateFaceCaptured && updateFaceBase64 && (
                           <img src={`data:image/jpeg;base64,${updateFaceBase64}`} alt="Face capture" className="w-full max-h-[200px] object-cover" />
                         )}
@@ -1083,25 +1083,25 @@ export default function UserDashboard() {
                       </div>
                       <div className="flex gap-2.5 mb-2.5">
                         {!updateStream && !updateFaceCaptured && (
-                          <Button onClick={ufStartCamera} className="w-full justify-center">
+                          <Button onClick={ufStartCamera} className="justify-center w-full">
                             <Camera className="w-4 h-4" />
                             Open Camera
                           </Button>
                         )}
                         {updateStream && !updateFaceCaptured && (
-                          <Button onClick={ufCapture} className="w-full justify-center">
+                          <Button onClick={ufCapture} className="justify-center w-full">
                             <Check className="w-4 h-4" />
                             Capture Face
                           </Button>
                         )}
                         {updateFaceCaptured && (
-                          <Button variant="ghost" onClick={ufRetake} className="flex-1 justify-center">
+                          <Button variant="ghost" onClick={ufRetake} className="justify-center flex-1">
                             <RefreshCw className="w-4 h-4" />
                             Retake
                           </Button>
                         )}
                       </div>
-                      <Button onClick={doUpdateFace} disabled={!updateFaceValid} className="w-full justify-center">
+                      <Button onClick={doUpdateFace} disabled={!updateFaceValid} className="justify-center w-full">
                         <User className="w-4 h-4" />
                         Update Face
                       </Button>
@@ -1116,24 +1116,24 @@ export default function UserDashboard() {
 
       {/* Set PIN Banner */}
       {!hasPin && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-40 bg-amber-500 text-white px-6 py-3 rounded-xl shadow-lg text-sm font-semibold flex items-center gap-3">
+        <div className="fixed z-40 flex items-center gap-3 px-6 py-3 text-sm font-semibold text-white -translate-x-1/2 shadow-lg top-4 left-1/2 bg-amber-500 rounded-xl">
           <AlertTriangle className="w-4 h-4" />
           You haven't set a PIN yet — required to send money.
-          <button onClick={() => setShowSetPinModal(true)} className="underline ml-1">Set PIN now</button>
+          <button onClick={() => setShowSetPinModal(true)} className="ml-1 underline">Set PIN now</button>
         </div>
       )}
 
       {/* Set PIN Modal */}
       {showSetPinModal && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="bg-white rounded-2xl p-8 w-[320px] shadow-2xl text-center">
-            <div className="w-14 h-14 rounded-full bg-gradient-to-br from-amber-500 to-red-500 flex items-center justify-center mx-auto mb-4">
-              <Lock className="w-7 h-7 text-white" />
+            <div className="flex items-center justify-center mx-auto mb-4 rounded-full w-14 h-14 bg-gradient-to-br from-amber-500 to-red-500">
+              <Lock className="text-white w-7 h-7" />
             </div>
-            <h3 className="text-base font-bold mb-1">Set Your PIN</h3>
-            <p className="text-xs text-slate-500 mb-4">Create a 4–6 digit PIN to authorize transfers</p>
+            <h3 className="mb-1 text-base font-bold">Set Your PIN</h3>
+            <p className="mb-4 text-xs text-slate-500">Create a 4–6 digit PIN to authorize transfers</p>
             {newPinMsg.show && (
-              <div className="p-2 rounded-lg text-xs mb-3 bg-rose-500/10 text-rose-500 border border-rose-500/20">
+              <div className="p-2 mb-3 text-xs border rounded-lg bg-rose-500/10 text-rose-500 border-rose-500/20">
                 {newPinMsg.message}
               </div>
             )}
@@ -1146,10 +1146,10 @@ export default function UserDashboard() {
               className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg bg-slate-50 text-sm focus:border-emerald-500 outline-none mb-4"
             />
             <div className="flex gap-2">
-              <Button variant="ghost" onClick={() => setShowSetPinModal(false)} className="flex-1 justify-center">
+              <Button variant="ghost" onClick={() => setShowSetPinModal(false)} className="justify-center flex-1">
                 Later
               </Button>
-              <Button onClick={doSetPin} className="flex-1 justify-center">
+              <Button onClick={doSetPin} className="justify-center flex-1">
                 <Lock className="w-4 h-4" />
                 Set PIN
               </Button>
@@ -1160,15 +1160,15 @@ export default function UserDashboard() {
       
       {/* PIN Modal */}
       {showPinModal && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="bg-white rounded-2xl p-8 w-[320px] shadow-2xl text-center">
-            <div className="w-14 h-14 rounded-full bg-gradient-to-br from-emerald-500 to-sky-500 flex items-center justify-center mx-auto mb-4">
-              <Lock className="w-7 h-7 text-white" />
+            <div className="flex items-center justify-center mx-auto mb-4 rounded-full w-14 h-14 bg-gradient-to-br from-emerald-500 to-sky-500">
+              <Lock className="text-white w-7 h-7" />
             </div>
-            <h3 className="text-base font-bold mb-1">Enter PIN</h3>
-            <p className="text-xs text-slate-500 mb-4">Your 4–6 digit transaction PIN</p>
+            <h3 className="mb-1 text-base font-bold">Enter PIN</h3>
+            <p className="mb-4 text-xs text-slate-500">Your 4–6 digit transaction PIN</p>
             {pinModalMsg.show && (
-              <div className="p-2 rounded-lg text-xs mb-3 bg-rose-500/10 text-rose-500 border border-rose-500/20">
+              <div className="p-2 mb-3 text-xs border rounded-lg bg-rose-500/10 text-rose-500 border-rose-500/20">
                 {pinModalMsg.message}
               </div>
             )}
@@ -1181,10 +1181,10 @@ export default function UserDashboard() {
               className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg bg-slate-50 text-sm focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/10 outline-none mb-4"
             />
             <div className="flex gap-2">
-              <Button variant="ghost" onClick={() => { setShowPinModal(false); setPinInput(''); setPinModalMsg({ show: false, message: '' }); }} className="flex-1 justify-center">
+              <Button variant="ghost" onClick={() => { setShowPinModal(false); setPinInput(''); setPinModalMsg({ show: false, message: '' }); }} className="justify-center flex-1">
                 Cancel
               </Button>
-              <Button onClick={confirmTransfer} className="flex-1 justify-center">
+              <Button onClick={confirmTransfer} className="justify-center flex-1">
                 Confirm
               </Button>
             </div>

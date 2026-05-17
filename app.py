@@ -77,7 +77,7 @@ app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024   # 16 MB
 DB_CONFIG = {
     'dbname': 'momo_fraud',
     'user': 'postgres',
-    'password': 'Eric@!99',
+    'password': 'Admin@123',
     'host': 'localhost',
     'port': '5432'
 }

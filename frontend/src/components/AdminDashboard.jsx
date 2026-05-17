@@ -370,9 +370,9 @@ export default function AdminDashboard() {
   return (
     <div className="min-h-screen bg-gray-100">
       {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
+      <header className="bg-white border-b shadow-sm">
+        <div className="px-4 mx-auto max-w-7xl sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between py-4">
             <div className="flex items-center space-x-4">
               <Shield className="w-8 h-8 text-blue-600" />
               <h1 className="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
@@ -380,7 +380,7 @@ export default function AdminDashboard() {
             <div className="flex items-center space-x-4">
               <span id="admin-name" className="text-gray-700">System Administrator</span>
               <Button variant="danger" onClick={logout}>
-                <LogOut className="w-4 h-4 inline mr-2" />
+                <LogOut className="inline w-4 h-4 mr-2" />
                 Logout
               </Button>
             </div>
@@ -390,10 +390,10 @@ export default function AdminDashboard() {
 
       {/* Navigation Tabs */}
       <div className="bg-white border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <nav className="flex space-x-8 py-4">
+        <div className="px-4 mx-auto max-w-7xl sm:px-6 lg:px-8">
+          <nav className="flex py-4 space-x-8">
             <TabButton tab="overview" icon={LayoutDashboard} label="Overview" />
-            <TabButton tab="providers" icon={Users} label="Providers" />
+            <TabButton tab="providers" icon={Users} label="Managers" />
             <TabButton tab="users" icon={UserCheck} label="Users" />
             <TabButton tab="fraud-alerts" icon={AlertTriangle} label="Fraud Alerts" />
             <TabButton tab="security" icon={Lock} label="Security" />
@@ -405,14 +405,14 @@ export default function AdminDashboard() {
       </div>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="px-4 py-8 mx-auto max-w-7xl sm:px-6 lg:px-8">
         {/* Overview Tab */}
         {activeTab === 'overview' && (
           <div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              <Card className="cursor-pointer hover:shadow-lg transition-shadow" onClick={() => setActiveTab('users')}>
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
+              <Card className="transition-shadow cursor-pointer hover:shadow-lg" onClick={() => setActiveTab('users')}>
                 <div className="flex items-center">
-                  <Users className="w-8 h-8 text-blue-600 mr-3" />
+                  <Users className="w-8 h-8 mr-3 text-blue-600" />
                   <div>
                     <p className="text-sm text-gray-600">Total Users</p>
                     <p className="text-2xl font-bold text-gray-900">{stats.total_users || '0'}</p>
@@ -420,19 +420,19 @@ export default function AdminDashboard() {
                 </div>
               </Card>
               
-              <Card className="cursor-pointer hover:shadow-lg transition-shadow" onClick={() => setActiveTab('providers')}>
+              <Card className="transition-shadow cursor-pointer hover:shadow-lg" onClick={() => setActiveTab('providers')}>
                 <div className="flex items-center">
-                  <Users className="w-8 h-8 text-green-600 mr-3" />
+                  <Users className="w-8 h-8 mr-3 text-green-600" />
                   <div>
-                    <p className="text-sm text-gray-600">Active Providers</p>
+                    <p className="text-sm text-gray-600">Active Managers</p>
                     <p className="text-2xl font-bold text-gray-900">{stats.active_providers || '0'}</p>
                   </div>
                 </div>
               </Card>
               
-              <Card className="cursor-pointer hover:shadow-lg transition-shadow" onClick={() => setActiveTab('fraud-alerts')}>
+              <Card className="transition-shadow cursor-pointer hover:shadow-lg" onClick={() => setActiveTab('fraud-alerts')}>
                 <div className="flex items-center">
-                  <AlertTriangle className="w-8 h-8 text-orange-600 mr-3" />
+                  <AlertTriangle className="w-8 h-8 mr-3 text-orange-600" />
                   <div>
                     <p className="text-sm text-gray-600">Fraud Alerts</p>
                     <p className="text-2xl font-bold text-gray-900">{stats.fraud_alerts || '0'}</p>
@@ -440,9 +440,9 @@ export default function AdminDashboard() {
                 </div>
               </Card>
               
-              <Card className="cursor-pointer hover:shadow-lg transition-shadow" onClick={() => setActiveTab('performance')}>
+              <Card className="transition-shadow cursor-pointer hover:shadow-lg" onClick={() => setActiveTab('performance')}>
                 <div className="flex items-center">
-                  <Activity className="w-8 h-8 text-green-600 mr-3" />
+                  <Activity className="w-8 h-8 mr-3 text-green-600" />
                   <div>
                     <p className="text-sm text-gray-600">System Status</p>
                     <p className="text-lg font-bold text-gray-900">Healthy</p>
@@ -451,15 +451,15 @@ export default function AdminDashboard() {
               </Card>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
               <Card>
-                <h3 className="text-lg font-semibold mb-4">Recent Activity</h3>
+                <h3 className="mb-4 text-lg font-semibold">Recent Activity</h3>
                 <div className="space-y-2">
                   <p className="text-gray-500">No recent activity</p>
                 </div>
               </Card>
               <Card>
-                <h3 className="text-lg font-semibold mb-4">System Health</h3>
+                <h3 className="mb-4 text-lg font-semibold">System Health</h3>
                 <div className="space-y-2">
                   {stats.health ? (
                     Object.entries(stats.health).map(([k, v]) => (
@@ -477,14 +477,14 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* Providers Tab */}
+        {/* Managers Tab */}
         {activeTab === 'providers' && (
           <Card>
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-semibold">Service Providers Management</h2>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-semibold">Management of Managers</h2>
               <Button onClick={showAddProviderModal}>
-                <Plus className="w-4 h-4 inline mr-2" />
-                Add Provider
+                <Plus className="inline w-4 h-4 mr-2" />
+                Add Manager
               </Button>
             </div>
             
@@ -492,15 +492,15 @@ export default function AdminDashboard() {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">NAME</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">EMAIL</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">PHONE</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">NATIONAL ID</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">SEX</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">STATUS</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">CREATED</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ACTIONS</th>
+                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">ID</th>
+                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">NAME</th>
+                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">EMAIL</th>
+                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">PHONE</th>
+                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">NATIONAL ID</th>
+                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">SEX</th>
+                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">STATUS</th>
+                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">CREATED</th>
+                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">ACTIONS</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
@@ -517,7 +517,7 @@ export default function AdminDashboard() {
                         <td className="px-6 py-4 text-sm">{provider.sex}</td>
                         <td className="px-6 py-4 text-sm">{provider.status === '1' ? 'Active' : 'Inactive'}</td>
                         <td className="px-6 py-4 text-sm">{fmtDate(provider.created_at)}</td>
-                        <td className="px-6 py-4 text-sm flex gap-2">
+                        <td className="flex gap-2 px-6 py-4 text-sm">
                           <Button className="text-xs" onClick={() => showEditProviderModal(provider)}>Edit</Button>
                           <Button variant="danger" className="text-xs" onClick={() => deleteProvider(provider.id)}>Delete</Button>
                         </td>
@@ -533,7 +533,7 @@ export default function AdminDashboard() {
         {/* Users Tab */}
         {activeTab === 'users' && (
           <Card>
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-semibold">User Management</h2>
               <input
                 type="text"
@@ -546,14 +546,14 @@ export default function AdminDashboard() {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">National ID</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sex</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Balance</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">Phone</th>
+                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">Name</th>
+                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">Email</th>
+                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">National ID</th>
+                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">Sex</th>
+                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">Balance</th>
+                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">Status</th>
+                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
@@ -569,7 +569,7 @@ export default function AdminDashboard() {
                         <td className="px-6 py-4 text-sm">{user.sex}</td>
                         <td className="px-6 py-4 text-sm">{Number(user.balance).toLocaleString()} RWF</td>
                         <td className="px-6 py-4 text-sm">{user.is_active ? 'Active' : 'Inactive'}</td>
-                        <td className="px-6 py-4 text-sm flex gap-2">
+                        <td className="flex gap-2 px-6 py-4 text-sm">
                           <Button className="text-xs" onClick={() => showEditUserModal(user)}>Edit</Button>
                           <Button variant="danger" className="text-xs" onClick={() => deleteUser(user.phone)}>Delete</Button>
                         </td>
@@ -585,7 +585,7 @@ export default function AdminDashboard() {
         {/* Fraud Alerts Tab */}
         {activeTab === 'fraud-alerts' && (
           <Card>
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-semibold">Fraud Alerts</h2>
               <span className="text-xs text-gray-500">Auto-refreshing every 15 seconds</span>
             </div>
@@ -594,9 +594,9 @@ export default function AdminDashboard() {
                 <p className="text-gray-500">No fraud alerts</p>
               ) : (
                 fraudAlerts.map((alert) => (
-                  <div key={alert.id} className="p-4 bg-gray-50 rounded-lg">
+                  <div key={alert.id} className="p-4 rounded-lg bg-gray-50">
                     <p className="text-sm">{alert.message}</p>
-                    <p className="text-xs text-gray-500 mt-1">{fmtDate(alert.created_at)} | Score: {((alert.fraud_score || 0) * 100).toFixed(1)}%</p>
+                    <p className="mt-1 text-xs text-gray-500">{fmtDate(alert.created_at)} | Score: {((alert.fraud_score || 0) * 100).toFixed(1)}%</p>
                   </div>
                 ))
               )}
@@ -606,9 +606,9 @@ export default function AdminDashboard() {
 
         {/* Security Tab */}
         {activeTab === 'security' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <Card>
-              <h3 className="text-lg font-semibold mb-4">Security Settings</h3>
+              <h3 className="mb-4 text-lg font-semibold">Security Settings</h3>
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <span>Two-Factor Authentication</span>
@@ -630,19 +630,19 @@ export default function AdminDashboard() {
                 <h3 className="text-lg font-semibold">Access Logs</h3>
                 <span className="text-xs text-gray-500">Auto-refreshing every 30 seconds</span>
               </div>
-              <div className="space-y-2 max-h-72 overflow-y-auto">
+              <div className="space-y-2 overflow-y-auto max-h-72">
                 {accessLogs.length === 0 ? (
                   <p className="text-gray-500">No access logs found</p>
                 ) : (
                   accessLogs.map((log) => (
-                    <div key={log.id} className="p-2 bg-gray-50 rounded text-xs border-l-4 border-blue-400">
-                      <div className="flex justify-between items-center">
+                    <div key={log.id} className="p-2 text-xs border-l-4 border-blue-400 rounded bg-gray-50">
+                      <div className="flex items-center justify-between">
                         <span className={`font-semibold ${log.status === 'SUCCESS' ? 'text-green-600' : 'text-red-600'}`}>
                           {log.event_type}
                         </span>
                         <span className="text-gray-400">{log.ip_address}</span>
                       </div>
-                      <div className="text-gray-700 mt-1">
+                      <div className="mt-1 text-gray-700">
                         {log.full_name || 'Unknown'} — {log.identifier}
                       </div>
                       {log.detail && <div className="text-gray-500 mt-0.5">{log.detail}</div>}
@@ -657,16 +657,16 @@ export default function AdminDashboard() {
 
         {/* Backup Tab */}
         {activeTab === 'backup' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <Card>
-              <h3 className="text-lg font-semibold mb-4">Database Backup</h3>
+              <h3 className="mb-4 text-lg font-semibold">Database Backup</h3>
               <div className="space-y-4">
                 <Button variant="success" className="w-full">
-                  <Download className="w-4 h-4 inline mr-2" />
+                  <Download className="inline w-4 h-4 mr-2" />
                   Create Backup
                 </Button>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Restore from Backup</label>
+                  <label className="block mb-2 text-sm font-medium text-gray-700">Restore from Backup</label>
                   <input type="file" accept=".db,.sql" className="w-full px-3 py-2 border rounded" />
                   <Button className="w-full mt-2">Restore</Button>
                 </div>
@@ -674,7 +674,7 @@ export default function AdminDashboard() {
             </Card>
             
             <Card>
-              <h3 className="text-lg font-semibold mb-4">Backup History</h3>
+              <h3 className="mb-4 text-lg font-semibold">Backup History</h3>
               <div className="space-y-2">
                 <p className="text-gray-500">No backup history available</p>
               </div>
@@ -684,17 +684,17 @@ export default function AdminDashboard() {
 
         {/* Performance Tab */}
         {activeTab === 'performance' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <Card>
-              <h3 className="text-lg font-semibold mb-4">System Performance</h3>
+              <h3 className="mb-4 text-lg font-semibold">System Performance</h3>
               <div className="space-y-4">
                 <div>
                   <div className="flex justify-between mb-1">
                     <span className="text-sm text-gray-600">CPU Usage</span>
                     <span className="text-sm font-medium">-</span>
                   </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div className="bg-blue-600 h-2 rounded-full" style={{ width: '0%' }}></div>
+                  <div className="w-full h-2 bg-gray-200 rounded-full">
+                    <div className="h-2 bg-blue-600 rounded-full" style={{ width: '0%' }}></div>
                   </div>
                 </div>
                 <div>
@@ -702,15 +702,15 @@ export default function AdminDashboard() {
                     <span className="text-sm text-gray-600">Memory Usage</span>
                     <span className="text-sm font-medium">-</span>
                   </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div className="bg-green-600 h-2 rounded-full" style={{ width: '0%' }}></div>
+                  <div className="w-full h-2 bg-gray-200 rounded-full">
+                    <div className="h-2 bg-green-600 rounded-full" style={{ width: '0%' }}></div>
                   </div>
                 </div>
               </div>
             </Card>
             
             <Card>
-              <h3 className="text-lg font-semibold mb-4">Transaction Statistics</h3>
+              <h3 className="mb-4 text-lg font-semibold">Transaction Statistics</h3>
               <div className="space-y-3">
                 {stats.txStats ? (
                   <>
@@ -750,11 +750,11 @@ export default function AdminDashboard() {
         {/* Settings Tab */}
         {activeTab === 'settings' && (
           <Card>
-            <h3 className="text-lg font-semibold mb-4">System Settings</h3>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <h3 className="mb-4 text-lg font-semibold">System Settings</h3>
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">System Name</label>
+                  <label className="block mb-2 text-sm font-medium text-gray-700">System Name</label>
                   <input
                     type="text"
                     value={settings.system_name}
@@ -763,7 +763,7 @@ export default function AdminDashboard() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Max Transfer Amount</label>
+                  <label className="block mb-2 text-sm font-medium text-gray-700">Max Transfer Amount</label>
                   <input
                     type="number"
                     value={settings.max_transfer}
@@ -772,7 +772,7 @@ export default function AdminDashboard() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Fraud Threshold</label>
+                  <label className="block mb-2 text-sm font-medium text-gray-700">Fraud Threshold</label>
                   <input
                     type="number"
                     value={settings.fraud_threshold}
@@ -786,7 +786,7 @@ export default function AdminDashboard() {
               </div>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Session Timeout (minutes)</label>
+                  <label className="block mb-2 text-sm font-medium text-gray-700">Session Timeout (minutes)</label>
                   <input
                     type="number"
                     value={settings.session_timeout}
@@ -795,7 +795,7 @@ export default function AdminDashboard() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Max PIN Attempts</label>
+                  <label className="block mb-2 text-sm font-medium text-gray-700">Max PIN Attempts</label>
                   <input
                     type="number"
                     value={settings.max_pin_attempts}
@@ -804,7 +804,7 @@ export default function AdminDashboard() {
                   />
                 </div>
                 <Button onClick={saveSettings} className="w-full">
-                  <Save className="w-4 h-4 inline mr-2" />
+                  <Save className="inline w-4 h-4 mr-2" />
                   Save Settings
                 </Button>
               </div>
@@ -815,14 +815,14 @@ export default function AdminDashboard() {
 
       {/* Provider Modal */}
       {showProviderModal && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-5 w-96 shadow-lg">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-600 bg-opacity-50">
+          <div className="p-5 bg-white rounded-lg shadow-lg w-96">
+            <h3 className="mb-4 text-lg font-medium text-gray-900">
               {editingProvider ? 'Edit Provider' : 'Add New Provider'}
             </h3>
             <form onSubmit={saveProvider} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Provider Name</label>
+                <label className="block mb-1 text-sm font-medium text-gray-700">Provider Name</label>
                 <input
                   type="text"
                   value={providerForm.name}
@@ -832,7 +832,7 @@ export default function AdminDashboard() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <label className="block mb-1 text-sm font-medium text-gray-700">Email</label>
                 <input
                   type="email"
                   value={providerForm.email}
@@ -842,7 +842,7 @@ export default function AdminDashboard() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+                <label className="block mb-1 text-sm font-medium text-gray-700">Phone Number</label>
                 <input
                   type="tel"
                   value={providerForm.phone}
@@ -852,7 +852,7 @@ export default function AdminDashboard() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">National ID</label>
+                <label className="block mb-1 text-sm font-medium text-gray-700">National ID</label>
                 <input
                   type="text"
                   value={providerForm.national_id}
@@ -862,7 +862,7 @@ export default function AdminDashboard() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Sex</label>
+                <label className="block mb-1 text-sm font-medium text-gray-700">Sex</label>
                 <select
                   value={providerForm.sex}
                   onChange={(e) => setProviderForm({ ...providerForm, sex: e.target.value })}
@@ -875,7 +875,7 @@ export default function AdminDashboard() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <label className="block mb-1 text-sm font-medium text-gray-700">Status</label>
                 <select
                   value={providerForm.status}
                   onChange={(e) => setProviderForm({ ...providerForm, status: e.target.value })}
@@ -887,7 +887,7 @@ export default function AdminDashboard() {
               </div>
               {!editingProvider && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                  <label className="block mb-1 text-sm font-medium text-gray-700">Password</label>
                   <input
                     type="password"
                     value={providerForm.password}
@@ -901,11 +901,11 @@ export default function AdminDashboard() {
                 <button
                   type="button"
                   onClick={() => setShowProviderModal(false)}
-                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+                  className="px-4 py-2 text-gray-700 bg-gray-300 rounded hover:bg-gray-400"
                 >
                   Cancel
                 </button>
-                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+                <button type="submit" className="px-4 py-2 text-white bg-blue-600 rounded hover:bg-blue-700">
                   {editingProvider ? 'Update' : 'Add'} Provider
                 </button>
               </div>
@@ -916,12 +916,12 @@ export default function AdminDashboard() {
 
       {/* User Modal */}
       {showUserModal && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-5 w-96 shadow-lg">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Edit User</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-600 bg-opacity-50">
+          <div className="p-5 bg-white rounded-lg shadow-lg w-96">
+            <h3 className="mb-4 text-lg font-medium text-gray-900">Edit User</h3>
             <form onSubmit={saveUser} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                <label className="block mb-1 text-sm font-medium text-gray-700">Full Name</label>
                 <input
                   type="text"
                   value={userForm.name}
@@ -931,7 +931,7 @@ export default function AdminDashboard() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <label className="block mb-1 text-sm font-medium text-gray-700">Email</label>
                 <input
                   type="email"
                   value={userForm.email}
@@ -940,16 +940,16 @@ export default function AdminDashboard() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+                <label className="block mb-1 text-sm font-medium text-gray-700">Phone Number</label>
                 <input
                   type="tel"
                   value={userForm.phone}
                   readOnly
-                  className="w-full px-3 py-2 border rounded bg-gray-100"
+                  className="w-full px-3 py-2 bg-gray-100 border rounded"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">National ID</label>
+                <label className="block mb-1 text-sm font-medium text-gray-700">National ID</label>
                 <input
                   type="text"
                   value={userForm.national_id}
@@ -958,7 +958,7 @@ export default function AdminDashboard() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Sex</label>
+                <label className="block mb-1 text-sm font-medium text-gray-700">Sex</label>
                 <select
                   value={userForm.sex}
                   onChange={(e) => setUserForm({ ...userForm, sex: e.target.value })}
@@ -971,7 +971,7 @@ export default function AdminDashboard() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Account Balance</label>
+                <label className="block mb-1 text-sm font-medium text-gray-700">Account Balance</label>
                 <input
                   type="number"
                   value={userForm.balance}
@@ -981,7 +981,7 @@ export default function AdminDashboard() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <label className="block mb-1 text-sm font-medium text-gray-700">Status</label>
                 <select
                   value={userForm.status}
                   onChange={(e) => setUserForm({ ...userForm, status: e.target.value })}
@@ -995,11 +995,11 @@ export default function AdminDashboard() {
                 <button
                   type="button"
                   onClick={() => setShowUserModal(false)}
-                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+                  className="px-4 py-2 text-gray-700 bg-gray-300 rounded hover:bg-gray-400"
                 >
                   Cancel
                 </button>
-                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+                <button type="submit" className="px-4 py-2 text-white bg-blue-600 rounded hover:bg-blue-700">
                   Update User
                 </button>
               </div>

@@ -157,7 +157,7 @@ def check_database() -> bool:
         import psycopg2
         conn = psycopg2.connect(
             dbname='momo_fraud', user='postgres',
-            password='Eric@!99', host='localhost', port='5432'
+            password='Admin@123', host='localhost', port='5432'
         )
         c = conn.cursor()
         c.execute("SELECT COUNT(*) FROM users")
