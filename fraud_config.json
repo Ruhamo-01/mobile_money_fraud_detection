@@ -27,9 +27,9 @@
   "fraud_f1": 0.7223,
   "roc_auc": 0.9728,
   "fraud_logic": {
-    "rule1_amount_spike": "amount > 5x user_typical_max \u2192 REQUIRE_FACE",
-    "rule2_pin_failures": "pin_fail_count >= 2 (3rd attempt) \u2192 REQUIRE_FACE",
-    "rule3_balance_abuse": "amount > balance \u2192 HARD_BLOCK (impossible tx); if 3rd time \u2192 permanent block",
+    "rule1_amount_spike": "amount > 5x user_typical_max -> REQUIRE_FACE",
+    "rule2_pin_failures": "pin_fail_count >= 2 (3rd attempt) -> REQUIRE_FACE",
+    "rule3_balance_abuse": "amount > balance -> HARD_BLOCK; if 3rd time -> permanent block",
     "face_verify_triggers": [
       "is_amount_spike=1",
       "pin_near_lockout=1"
