@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-run_system.py — MoMo Shield Startup Script
+run_system.py -- MoMo Shield Startup Script
 ============================================
 Checks dependencies, verifies ML model files,
 then launches the Flask server.
@@ -27,15 +27,15 @@ from threading import Thread
 def banner():
     print("""
 ╔══════════════════════════════════════════════════════════════╗
-║          MOMO SHIELD — Fraud Detection System  v2.0          ║
+║          MOMO SHIELD -- Fraud Detection System  v2.0          ║
 ║  ML-Powered · Face Verification · Travel Control · Alerts    ║
 ╚══════════════════════════════════════════════════════════════╝
 """)
 
-def ok(msg):   print(f"  ✅  {msg}")
-def warn(msg): print(f"  ⚠️   {msg}")
-def err(msg):  print(f"  ❌  {msg}")
-def info(msg): print(f"  ℹ️   {msg}")
+def ok(msg):   print(f"  [OK]  {msg}")
+def warn(msg): print(f"  [WARN] {msg}")
+def err(msg):  print(f"  [ERR]  {msg}")
+def info(msg): print(f"  [INFO] {msg}")
 def sep():     print("  " + "─" * 58)
 
 
@@ -71,7 +71,7 @@ def check_dependencies() -> bool:
             __import__(imp)
             ok(pkg)
         except ImportError:
-            err(f"{pkg}  ← MISSING")
+            err(f"{pkg}  <- MISSING")
             missing.append(pkg)
 
     print("\n  Checking optional packages (face recognition)…")
@@ -80,7 +80,7 @@ def check_dependencies() -> bool:
             __import__(imp)
             ok(f"{pkg}  (optional)")
         except ImportError:
-            warn(f"{pkg}  not installed — face verification will use fallback mode")
+            warn(f"{pkg}  not installed -- face verification will use fallback mode")
 
     if missing:
         print(f"\n  Install missing packages:")
@@ -108,7 +108,7 @@ MODEL_FILES = [
     "fraud_config.json",
 ]
 
-TEMPLATE_FILES = []  # React frontend served by Vite — no HTML templates needed
+TEMPLATE_FILES = []  # React frontend served by Vite -- no HTML templates needed
 
 def check_files() -> bool:
     print("\n  Checking core Python files…")
@@ -117,7 +117,7 @@ def check_files() -> bool:
         if os.path.exists(f):
             ok(f)
         else:
-            err(f"{f}  ← NOT FOUND")
+            err(f"{f}  <- NOT FOUND")
             all_ok = False
 
     print("\n  Checking ML model files…")
@@ -127,7 +127,7 @@ def check_files() -> bool:
             size = os.path.getsize(f)
             ok(f"{f}  ({size:,} bytes)")
         else:
-            warn(f"{f}  not found — model not trained yet")
+            warn(f"{f}  not found -- model not trained yet")
             model_ready = False
 
     if model_ready:
@@ -163,7 +163,7 @@ def check_database() -> bool:
         c.execute("SELECT COUNT(*) FROM users")
         count = c.fetchone()[0]
         conn.close()
-        ok(f"PostgreSQL connected — {count} users in DB")
+        ok(f"PostgreSQL connected -- {count} users in DB")
     except Exception as e:
         err(f"PostgreSQL connection failed: {e}")
         return False
@@ -202,7 +202,7 @@ def train_model():
 
     notebook = "Momo_Clean.ipynb"
     if not os.path.exists(notebook):
-        err(f"{notebook} not found — cannot train.")
+        err(f"{notebook} not found -- cannot train.")
         return False
 
     try:
@@ -218,7 +218,7 @@ def train_model():
             ok("Notebook executed successfully.")
             return True
         else:
-            warn("nbconvert execution had errors — check notebook output.")
+            warn("nbconvert execution had errors -- check notebook output.")
             return False
     except FileNotFoundError:
         warn("jupyter not found. Install with:  pip install jupyter nbconvert")
@@ -282,7 +282,7 @@ def start_server():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="MoMo Shield — Fraud Detection System Launcher")
+        description="MoMo Shield -- Fraud Detection System Launcher")
     parser.add_argument("--train", action="store_true",
                         help="Run Momo_Clean.ipynb to train ML model before starting")
     parser.add_argument("--check", action="store_true",
@@ -293,7 +293,7 @@ def main():
 
     # ── 1. Dependencies ──────────────────────────────────────────────────
     sep()
-    print("  STEP 1 — Dependency Check")
+    print("  STEP 1 -- Dependency Check")
     sep()
     deps_ok = check_dependencies()
     if not deps_ok:
@@ -302,19 +302,19 @@ def main():
 
     # ── 2. Files ─────────────────────────────────────────────────────────
     sep()
-    print("  STEP 2 — File Check")
+    print("  STEP 2 -- File Check")
     sep()
     check_files()
 
     # ── 3. Database ───────────────────────────────────────────────────────
     sep()
-    print("  STEP 3 — Database Check")
+    print("  STEP 3 -- Database Check")
     sep()
     check_database()
 
     # ── 4. Dataset ────────────────────────────────────────────────────────
     sep()
-    print("  STEP 4 — Dataset Check")
+    print("  STEP 4 -- Dataset Check")
     sep()
     dataset_ok = check_dataset()
 
@@ -324,19 +324,19 @@ def main():
             err("Cannot train without Fraud.csv")
             sys.exit(1)
         sep()
-        print("  STEP 5 — Model Training")
+        print("  STEP 5 -- Model Training")
         sep()
         train_ok = train_model()
         if not train_ok:
-            warn("Training failed — server will run in rule-based mode only")
+            warn("Training failed -- server will run in rule-based mode only")
 
     # ── Model status summary ──────────────────────────────────────────────
     model_loaded = all(os.path.exists(f) for f in MODEL_FILES)
     sep()
     if model_loaded:
-        ok("ML model ready — full fraud detection enabled")
+        ok("ML model ready -- full fraud detection enabled")
     else:
-        warn("ML model NOT found — running in rule-based fallback mode")
+        warn("ML model NOT found -- running in rule-based fallback mode")
         info("To train the model:")
         info("  1. Make sure Fraud.csv is in this folder")
         info("  2. Run:  python run_system.py --train")
@@ -350,7 +350,7 @@ def main():
 
     # ── 6. Start server ───────────────────────────────────────────────────
     sep()
-    print("  STEP 6 — Starting Server")
+    print("  STEP 6 -- Starting Server")
     sep()
     start_server()
 

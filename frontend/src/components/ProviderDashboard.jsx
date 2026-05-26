@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutDashboard, AlertTriangle, Search, Users, Send, LogOut, Home, RefreshCw, Check, ArrowUpRight, ArrowDownLeft, ShieldAlert } from 'lucide-react';
-import { fmtRWF, fmtDate, showAlert, setLoading } from '../utils/helpers';
+import { LayoutDashboard, AlertTriangle, Search, Users, Send, LogOut, Home, RefreshCw, Check, ArrowUpRight, ArrowDownLeft, ShieldAlert, Activity } from 'lucide-react';
+import { fmtRWF, fmtDate, showAlert } from '../utils/helpers';
 
 const API = '';
 const TOKEN = () => localStorage.getItem('session_token');
@@ -11,7 +11,7 @@ const NavItem = ({ page, icon: Icon, label, badge, activePage, onNavigate }) => 
     onClick={() => onNavigate(page)}
     className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-xs font-semibold transition-all w-full text-left font-sans relative ${
       activePage === page
-        ? 'bg-emerald-500/10 text-emerald-500'
+        ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
         : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'
     }`}
   >
@@ -46,10 +46,10 @@ const Button = ({ children, variant = 'primary', className = '', ...props }) => 
 
 const AlertMsg = ({ msg }) => (
   msg.show && (
-    <div className={`p-2.5 rounded-lg text-xs mb-4 ${
-      msg.type === 'success' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' :
-      msg.type === 'error' ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20' :
-      'bg-sky-500/10 text-sky-500 border border-sky-500/20'
+    <div className={`p-3 rounded-lg text-sm mb-4 font-medium ${
+      msg.type === 'success' ? 'bg-emerald-50 text-emerald-800 border border-emerald-300' :
+      msg.type === 'error'   ? 'bg-rose-50 text-rose-800 border border-rose-300' :
+                               'bg-sky-50 text-sky-800 border border-sky-300'
     }`}>
       {msg.message}
     </div>
@@ -57,11 +57,73 @@ const AlertMsg = ({ msg }) => (
 );
 
 const StatCard = ({ value, label }) => (
-  <div className="p-6 text-center bg-white border-2 shadow-lg border-slate-300 rounded-2xl">
-    <div className="font-mono text-2xl font-bold text-emerald-500">{value}</div>
-    <div className="text-xs text-slate-500 mt-1.5">{label}</div>
+  <div className="p-6 text-center bg-white border-2 shadow-lg border-slate-200 rounded-2xl hover:border-emerald-300 hover:shadow-xl transition-all">
+    <div className="font-mono text-2xl font-bold text-emerald-600 mb-1">{value}</div>
+    <div className="text-xs font-semibold text-slate-600 mt-1.5">{label}</div>
   </div>
 );
+
+// ── XAI Explanation Panel ─────────────────────────────────────────────────
+const ExplainPanel = ({ explanation, loading }) => {
+  if (loading) return (
+    <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 flex items-center gap-2 animate-pulse">
+      <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-500 flex-shrink-0" />
+      Generating AI explanation…
+    </div>
+  );
+  if (!explanation) return null;
+  if (!explanation.available) return (
+    <div className="mt-3 p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700">
+      {explanation.error || 'Explanation unavailable'}
+    </div>
+  );
+  const factors = explanation.top_factors || [];
+  const maxImpact = Math.max(...factors.map(f => Math.abs(f.shap_value || f.importance || 0.001)), 0.001);
+  return (
+    <div className="mt-3 border border-violet-200 rounded-xl overflow-hidden">
+      <div className="bg-violet-50 px-4 py-2 flex items-center gap-2 border-b border-violet-200">
+        <Activity className="w-3.5 h-3.5 text-violet-600 flex-shrink-0" />
+        <span className="text-xs font-bold text-violet-800">AI Explanation</span>
+        <span className="ml-auto text-[10px] text-violet-500 font-medium bg-violet-100 px-2 py-0.5 rounded-full">
+          {explanation.method}
+        </span>
+      </div>
+      <div className="bg-white px-4 py-3 space-y-3">
+        {factors.slice(0, 5).map((f, i) => {
+          const isRisk = f.direction === 'increases_risk';
+          const pct = Math.min(Math.abs(f.shap_value || f.importance || 0) / maxImpact * 100, 100);
+          return (
+            <div key={i}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-semibold text-slate-800">{f.label}</span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  isRisk ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'
+                }`}>
+                  {isRisk ? '↑ Increases Risk' : '↓ Decreases Risk'}
+                </span>
+              </div>
+              <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${isRisk ? 'bg-rose-400' : 'bg-emerald-400'}`}
+                  style={{ width: `${pct}%`, transition: 'width 0.6s ease' }}
+                />
+              </div>
+              {f.detail && <p className="text-[10px] text-slate-500 mt-0.5">{f.detail}</p>}
+            </div>
+          );
+        })}
+        <div className="pt-2 border-t border-slate-100 grid grid-cols-3 text-[10px] text-slate-500 text-center">
+          <div>Score <strong className="block text-sm text-slate-800">{((explanation.fraud_score || 0) * 100).toFixed(1)}%</strong></div>
+          <div>Threshold <strong className="block text-sm text-slate-800">{((explanation.threshold || 0.38) * 100).toFixed(0)}%</strong></div>
+          <div>Risk <strong className={`block text-sm ${
+            explanation.fraud_score >= 0.65 ? 'text-rose-600' :
+            explanation.fraud_score >= (explanation.threshold || 0.38) ? 'text-amber-600' : 'text-emerald-600'
+          }`}>{explanation.fraud_score >= 0.65 ? 'HIGH' : explanation.fraud_score >= (explanation.threshold || 0.38) ? 'MEDIUM' : 'LOW'}</strong></div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export default function ProviderDashboard() {
   const navigate = useNavigate();
@@ -75,6 +137,11 @@ export default function ProviderDashboard() {
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupTransactions, setLookupTransactions] = useState([]);
   const [lookupFraudAlerts, setLookupFraudAlerts] = useState([]);
+
+  // XAI state
+  const [expandedAlert, setExpandedAlert] = useState(null);   // alert id with open explanation
+  const [alertExplanations, setAlertExplanations] = useState({});  // { alertId: explanation }
+  const [xaiLoading, setXaiLoading] = useState(null);  // alert id currently loading
   
   // Travel control state
   const [travelPhone, setTravelPhone] = useState('');
@@ -189,10 +256,50 @@ export default function ProviderDashboard() {
       const d = await r.json();
       if (d.success) {
         setAlerts(alerts.filter(a => a.id !== alertId));
+        setExpandedAlert(null);
         loadStats();
       }
     } catch (e) {
       console.error('Ack error:', e);
+    }
+  };
+
+  const fetchExplanation = async (alert) => {
+    // Use stored explanation from the alert if available
+    const stored = alert.explanation;
+    if (stored) {
+      setAlertExplanations(prev => ({ ...prev, [alert.id]: stored }));
+      setExpandedAlert(expandedAlert === alert.id ? null : alert.id);
+      return;
+    }
+    // Already fetched via API — just toggle
+    if (alertExplanations[alert.id]) {
+      setExpandedAlert(expandedAlert === alert.id ? null : alert.id);
+      return;
+    }
+    // Fallback: fetch from API (for old alerts without stored explanation)
+    setXaiLoading(alert.id);
+    setExpandedAlert(alert.id);
+    try {
+      const r = await fetch(`${API}/api/explain-transaction`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone_number: alert.phone_number || alert.phone,
+          amount      : alert.amount || 0,
+          network     : 'MTN'
+        })
+      });
+      const d = await r.json();
+      if (d.success) {
+        setAlertExplanations(prev => ({ ...prev, [alert.id]: d.explanation }));
+      } else {
+        setAlertExplanations(prev => ({ ...prev, [alert.id]: { available: false, error: d.error } }));
+      }
+    } catch (e) {
+      setAlertExplanations(prev => ({ ...prev, [alert.id]: { available: false, error: 'Network error' } }));
+    } finally {
+      setXaiLoading(null);
     }
   };
   
@@ -331,8 +438,8 @@ export default function ProviderDashboard() {
         </div>
         
         <div className="p-3.5 border-b border-slate-300 text-center">
-          <div className="text-xs font-semibold">Manager</div>
-          <div className="text-[11px] text-slate-500 mt-2 bg-emerald-500/8 border border-emerald-500/20 rounded-lg py-2 px-3 font-mono font-semibold text-emerald-500">
+          <div className="text-xs font-bold text-slate-700">Manager</div>
+          <div className="text-[11px] mt-2 bg-emerald-100 border border-emerald-300 rounded-lg py-2 px-3 font-mono font-semibold text-emerald-700">
             System Access
           </div>
         </div>
@@ -362,10 +469,10 @@ export default function ProviderDashboard() {
         {activePage === 'overview' && (
           <div>
             <div className="mb-6 text-center">
-              <h1 className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
+              <h1 className="text-2xl font-bold text-slate-900">
                 System Overview
               </h1>
-              <p className="mt-1 text-sm text-slate-500">Real-time fraud protection statistics</p>
+              <p className="mt-1 text-sm text-slate-600">Real-time fraud protection statistics</p>
             </div>
             
             <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-5 mb-6">
@@ -385,32 +492,51 @@ export default function ProviderDashboard() {
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-red-500 to-amber-500 flex items-center justify-center mb-2.5">
                     <AlertTriangle className="w-5 h-5 text-white" />
                   </div>
-                  <h2 className="text-base font-semibold">Recent Fraud Alerts</h2>
+                  <h2 className="text-base font-bold text-slate-800">Recent Fraud Alerts</h2>
                 </div>
                 <div className="p-0">
                   {alerts.length === 0 ? (
                     <div className="p-10 text-sm text-center text-slate-500">No alerts</div>
                   ) : (
                     alerts.map((alert) => (
-                      <div key={alert.id} className="flex items-start gap-3 p-4 border-b border-slate-300">
-                        <div className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${
-                          (alert.risk_level || '').toLowerCase() === 'high' ? 'bg-red-500' :
-                          (alert.risk_level || '').toLowerCase() === 'medium' ? 'bg-amber-500' :
-                          'bg-emerald-500'
-                        }`} />
-                        <div className="flex-1">
-                          <div className="text-sm">{alert.message || '—'}</div>
-                          <div className="text-[11px] text-slate-500 mt-1 font-mono">
-                            {fmtDate(alert.created_at)} | Score: {((alert.fraud_score || 0) * 100).toFixed(1)}% | {alert.action || '—'}
+                      <div key={alert.id} className="p-4 border-b border-slate-200 last:border-0">
+                        <div className="flex items-start gap-3">
+                          <div className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${
+                            (alert.risk_level || '').toLowerCase() === 'high' ? 'bg-red-500' :
+                            (alert.risk_level || '').toLowerCase() === 'medium' ? 'bg-amber-500' :
+                            'bg-emerald-500'
+                          }`} />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm text-slate-800">{alert.message || '—'}</div>
+                            <div className="text-[11px] text-slate-500 mt-1 font-mono">
+                              {fmtDate(alert.created_at)} | Score: {((alert.fraud_score || 0) * 100).toFixed(1)}% | {alert.action || '—'}
+                            </div>
+                            <ExplainPanel
+                              explanation={expandedAlert === alert.id ? alertExplanations[alert.id] : null}
+                              loading={xaiLoading === alert.id}
+                            />
+                          </div>
+                          <div className="flex flex-col gap-1.5 flex-shrink-0">
+                            <button
+                              onClick={() => fetchExplanation(alert)}
+                              className={`px-2.5 py-1.5 text-xs rounded border transition-all inline-flex items-center gap-1 ${
+                                expandedAlert === alert.id
+                                  ? 'bg-violet-100 text-violet-700 border-violet-300'
+                                  : 'bg-slate-50 text-slate-600 border-slate-300 hover:bg-violet-50 hover:text-violet-700 hover:border-violet-300'
+                              }`}
+                            >
+                              <Activity className="w-3 h-3" />
+                              {expandedAlert === alert.id ? 'Hide' : 'Explain'}
+                            </button>
+                            <button
+                              onClick={() => ackAlert(alert.id)}
+                              className="px-2.5 py-1.5 text-xs rounded bg-slate-100 text-slate-500 border border-slate-300 hover:bg-emerald-500 hover:text-white hover:border-emerald-500 transition-all inline-flex items-center gap-1"
+                            >
+                              <Check className="w-3 h-3" />
+                              Dismiss
+                            </button>
                           </div>
                         </div>
-                        <button
-                          onClick={() => ackAlert(alert.id)}
-                          className="px-3 py-1.5 text-xs rounded bg-slate-100 text-slate-500 border border-slate-300 hover:bg-emerald-500 hover:text-white hover:border-emerald-500 transition-all inline-flex items-center gap-1"
-                        >
-                          <Check className="w-3.5 h-3.5" />
-                          Dismiss
-                        </button>
                       </div>
                     ))
                   )}
@@ -424,7 +550,7 @@ export default function ProviderDashboard() {
       <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-sky-500 to-indigo-500 flex items-center justify-center mb-2.5">
         <ArrowUpRight className="w-5 h-5 text-white" />
       </div>
-      <h2 className="text-base font-semibold">Transaction History</h2>
+      <h2 className="text-base font-bold text-slate-800">Transaction History</h2>
     </div>
     <div className="p-0">
       {lookupTransactions.length === 0 ? (
@@ -435,7 +561,7 @@ export default function ProviderDashboard() {
           return (
             <div key={tx.id ?? i} className="flex items-center gap-3 p-4 text-xs border-b border-slate-200">
               <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                isSent ? 'bg-rose-500/10 text-rose-500' : 'bg-emerald-500/10 text-emerald-500'
+                isSent ? 'bg-rose-500/10 text-rose-500' : 'bg-emerald-100 text-emerald-700 border border-emerald-300'
               }`}>
                 {isSent ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownLeft className="w-4 h-4" />}
               </div>
@@ -447,9 +573,9 @@ export default function ProviderDashboard() {
                 {isSent ? '-' : '+'}{fmtRWF(tx.amount || 0)}
               </div>
               <div className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                tx.status === 'completed' ? 'bg-emerald-500/10 text-emerald-500' :
+                tx.status === 'completed' ? 'bg-emerald-100 text-emerald-700 border border-emerald-300' :
                 tx.status === 'blocked' ? 'bg-rose-500/10 text-rose-500' :
-                'bg-amber-500/10 text-amber-500'
+                'bg-amber-100 text-amber-700 border border-amber-300'
               }`}>
                 {tx.status || '—'}
               </div>
@@ -468,7 +594,7 @@ export default function ProviderDashboard() {
       <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-red-500 to-amber-500 flex items-center justify-center mb-2.5">
         <ShieldAlert className="w-5 h-5 text-white" />
       </div>
-      <h2 className="text-base font-semibold">Fraud Alerts</h2>
+      <h2 className="text-base font-bold text-slate-800">Fraud Alerts</h2>
     </div>
     <div className="p-0">
       {lookupFraudAlerts.length === 0 ? (
@@ -488,9 +614,9 @@ export default function ProviderDashboard() {
               </div>
             </div>
             <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
-              (alert.risk_level || '').toLowerCase() === 'high' ? 'bg-red-500/10 text-red-500' :
-              (alert.risk_level || '').toLowerCase() === 'medium' ? 'bg-amber-500/10 text-amber-500' :
-              'bg-emerald-500/10 text-emerald-500'
+              (alert.risk_level || '').toLowerCase() === 'high' ? 'bg-rose-100 text-rose-700 border border-rose-300' :
+              (alert.risk_level || '').toLowerCase() === 'medium' ? 'bg-amber-100 text-amber-700 border border-amber-300' :
+              'bg-emerald-100 text-emerald-700 border border-emerald-300'
             }`}>
               {alert.risk_level || 'low'}
             </span>
@@ -506,20 +632,20 @@ export default function ProviderDashboard() {
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-sky-500 flex items-center justify-center mb-2.5">
                     <RefreshCw className="w-5 h-5 text-white" />
                   </div>
-                  <h2 className="text-base font-semibold">Fraud Model Status</h2>
+                  <h2 className="text-base font-bold text-slate-800">Fraud Model Status</h2>
                 </div>
                 <div className="p-6">
                   <div className="flex justify-between py-3 border-b border-slate-200">
-                    <span className="text-xs text-slate-500">Model</span>
-                    <span className="font-mono text-xs font-semibold">{stats.ml_model || 'Loading…'}</span>
+                    <span className="text-xs font-medium text-slate-600">Model</span>
+                    <span className="font-mono text-xs font-bold text-slate-800">{stats.ml_model || 'Loading…'}</span>
                   </div>
                   <div className="flex justify-between py-3 border-b border-slate-200">
-                    <span className="text-xs text-slate-500">Threshold</span>
-                    <span className="font-mono text-xs font-semibold">{stats.threshold || '—'}</span>
+                    <span className="text-xs font-medium text-slate-600">Threshold</span>
+                    <span className="font-mono text-xs font-bold text-slate-800">{stats.threshold || '—'}</span>
                   </div>
                   <div className="flex justify-between py-3">
-                    <span className="text-xs text-slate-500">Status</span>
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 uppercase">Loaded</span>
+                    <span className="text-xs font-medium text-slate-600">Status</span>
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-300 uppercase">Loaded</span>
                   </div>
                 </div>
               </Card>
@@ -531,42 +657,61 @@ export default function ProviderDashboard() {
         {activePage === 'alerts' && (
           <div>
             <div className="mb-6 text-center">
-              <h1 className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
+              <h1 className="text-2xl font-bold text-slate-900">
                 Fraud Alerts
               </h1>
-              <p className="mt-1 text-sm text-slate-500">Unacknowledged fraud detection alerts</p>
+              <p className="mt-1 text-sm text-slate-600">Unacknowledged fraud detection alerts</p>
             </div>
             <Card>
               <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
                 <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-red-500 to-amber-500 flex items-center justify-center mb-2.5">
                   <AlertTriangle className="w-5 h-5 text-white" />
                 </div>
-                <h2 className="text-base font-semibold">All Alerts</h2>
+                <h2 className="text-base font-bold text-slate-800">All Alerts</h2>
               </div>
               <div className="p-0">
                 {alerts.length === 0 ? (
                   <div className="p-10 text-sm text-center text-slate-500">No alerts</div>
                 ) : (
                   alerts.map((alert) => (
-                    <div key={alert.id} className="flex items-start gap-3 p-4 border-b border-slate-300">
-                      <div className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${
-                        (alert.risk_level || '').toLowerCase() === 'high' ? 'bg-red-500' :
-                        (alert.risk_level || '').toLowerCase() === 'medium' ? 'bg-amber-500' :
-                        'bg-emerald-500'
-                      }`} />
-                      <div className="flex-1">
-                        <div className="text-sm">{alert.message || '—'}</div>
-                        <div className="text-[11px] text-slate-500 mt-1 font-mono">
-                          {fmtDate(alert.created_at)} | Score: {((alert.fraud_score || 0) * 100).toFixed(1)}% | {alert.action || '—'}
+                    <div key={alert.id} className="p-4 border-b border-slate-200 last:border-0">
+                      <div className="flex items-start gap-3">
+                        <div className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${
+                          (alert.risk_level || '').toLowerCase() === 'high' ? 'bg-red-500' :
+                          (alert.risk_level || '').toLowerCase() === 'medium' ? 'bg-amber-500' :
+                          'bg-emerald-500'
+                        }`} />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm text-slate-800">{alert.message || '—'}</div>
+                          <div className="text-[11px] text-slate-500 mt-1 font-mono">
+                            {fmtDate(alert.created_at)} | Score: {((alert.fraud_score || 0) * 100).toFixed(1)}% | {alert.action || '—'}
+                          </div>
+                          <ExplainPanel
+                            explanation={expandedAlert === alert.id ? alertExplanations[alert.id] : null}
+                            loading={xaiLoading === alert.id}
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1.5 flex-shrink-0">
+                          <button
+                            onClick={() => fetchExplanation(alert)}
+                            className={`px-2.5 py-1.5 text-xs rounded border transition-all inline-flex items-center gap-1 ${
+                              expandedAlert === alert.id
+                                ? 'bg-violet-100 text-violet-700 border-violet-300'
+                                : 'bg-slate-50 text-slate-600 border-slate-300 hover:bg-violet-50 hover:text-violet-700 hover:border-violet-300'
+                            }`}
+                          >
+                            <Activity className="w-3 h-3" />
+                            {expandedAlert === alert.id ? 'Hide' : 'Explain'}
+                          </button>
+                          <button
+                            onClick={() => ackAlert(alert.id)}
+                            className="px-2.5 py-1.5 text-xs rounded bg-slate-100 text-slate-500 border border-slate-300 hover:bg-emerald-500 hover:text-white hover:border-emerald-500 transition-all inline-flex items-center gap-1"
+                          >
+                            <Check className="w-3 h-3" />
+                            Dismiss
+                          </button>
                         </div>
                       </div>
-                      <button
-                        onClick={() => ackAlert(alert.id)}
-                        className="px-3 py-1.5 text-xs rounded bg-slate-100 text-slate-500 border border-slate-300 hover:bg-emerald-500 hover:text-white hover:border-emerald-500 transition-all inline-flex items-center gap-1"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        Dismiss
-                      </button>
                     </div>
                   ))
                 )}
@@ -579,10 +724,10 @@ export default function ProviderDashboard() {
         {activePage === 'user-lookup' && (
   <div>
     <div className="mb-6 text-center">
-      <h1 className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
+      <h1 className="text-2xl font-bold text-slate-900">
         User Lookup
       </h1>
-      <p className="mt-1 text-sm text-slate-500">Search user by phone number</p>
+      <p className="mt-1 text-sm text-slate-600">Search user by phone number</p>
     </div>
     
     <div className="max-w-[600px] mx-auto">
@@ -591,7 +736,7 @@ export default function ProviderDashboard() {
           <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-sky-500 flex items-center justify-center mb-2.5">
             <Search className="w-5 h-5 text-white" />
           </div>
-          <h2 className="text-base font-semibold">Search by Phone Number</h2>
+          <h2 className="text-base font-bold text-slate-800">Search by Phone Number</h2>
         </div>
         <div className="p-6">
           <AlertMsg msg={lookupMsg} />
@@ -622,28 +767,30 @@ export default function ProviderDashboard() {
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-sky-500 flex items-center justify-center mb-2.5">
               <Users className="w-5 h-5 text-white" />
             </div>
-            <h2 className="text-base font-semibold">User Details</h2>
+            <h2 className="text-base font-bold text-slate-800">User Details</h2>
           </div>
           <div className="p-6">
             <div className="flex justify-between py-3 text-xs border-b border-slate-200">
-              <span className="text-slate-500">Name</span>
-              <span className="font-mono font-semibold">{lookupResult.name || '—'}</span>
+              <span className="font-medium text-slate-600">Name</span>
+              <span className="font-semibold text-slate-900">{lookupResult.name || '—'}</span>
             </div>
             <div className="flex justify-between py-3 text-xs border-b border-slate-200">
-              <span className="text-slate-500">Phone</span>
-              <span className="font-mono font-semibold">{lookupResult.phone || '—'}</span>
+              <span className="font-medium text-slate-600">Phone</span>
+              <span className="font-mono font-semibold text-slate-900">{lookupResult.phone || '—'}</span>
             </div>
             <div className="flex justify-between py-3 text-xs border-b border-slate-200">
-              <span className="text-slate-500">Email</span>
-              <span className="font-mono font-semibold">{lookupResult.email || '—'}</span>
+              <span className="font-medium text-slate-600">Email</span>
+              <span className="font-semibold text-slate-900">{lookupResult.email || '—'}</span>
             </div>
             <div className="flex justify-between py-3 text-xs border-b border-slate-200">
-              <span className="text-slate-500">Balance</span>
-              <span className="font-mono font-semibold">{fmtRWF(lookupResult.balance || 0)}</span>
+              <span className="font-medium text-slate-600">Balance</span>
+              <span className="font-mono font-bold text-emerald-700">{fmtRWF(lookupResult.balance || 0)}</span>
             </div>
             <div className="flex justify-between py-3 text-xs">
-              <span className="text-slate-500">Status</span>
-              <span className="font-mono font-semibold">{lookupResult.is_active ? 'Active' : 'Inactive'}</span>
+              <span className="font-medium text-slate-600">Status</span>
+              <span className={`font-bold px-2 py-0.5 rounded-full text-[10px] uppercase ${lookupResult.is_active ? 'bg-emerald-100 text-emerald-700 border border-emerald-300' : 'bg-rose-100 text-rose-700 border border-rose-300'}`}>
+                {lookupResult.is_active ? 'Active' : 'Inactive'}
+              </span>
             </div>
           </div>
         </Card>
@@ -656,7 +803,7 @@ export default function ProviderDashboard() {
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-sky-500 to-indigo-500 flex items-center justify-center mb-2.5">
               <ArrowUpRight className="w-5 h-5 text-white" />
             </div>
-            <h2 className="text-base font-semibold">Transaction History</h2>
+            <h2 className="text-base font-bold text-slate-800">Transaction History</h2>
           </div>
           <div className="p-0">
             {lookupTransactions.length === 0 ? (
@@ -667,7 +814,7 @@ export default function ProviderDashboard() {
                 return (
                   <div key={tx.id ?? i} className="flex items-center gap-3 p-4 text-xs border-b border-slate-200">
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      isSent ? 'bg-rose-500/10 text-rose-500' : 'bg-emerald-500/10 text-emerald-500'
+                      isSent ? 'bg-rose-500/10 text-rose-500' : 'bg-emerald-100 text-emerald-700 border border-emerald-300'
                     }`}>
                       {isSent ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownLeft className="w-4 h-4" />}
                     </div>
@@ -679,9 +826,9 @@ export default function ProviderDashboard() {
                       {isSent ? '-' : '+'}{fmtRWF(tx.amount || 0)}
                     </div>
                     <div className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                      tx.status === 'completed' ? 'bg-emerald-500/10 text-emerald-500' :
-                      tx.status === 'blocked' ? 'bg-rose-500/10 text-rose-500' :
-                      'bg-amber-500/10 text-amber-500'
+                      tx.status === 'completed' ? 'bg-emerald-100 text-emerald-700 border border-emerald-300' :
+                      tx.status === 'blocked'   ? 'bg-rose-100 text-rose-700 border border-rose-300' :
+                                                  'bg-amber-100 text-amber-700 border border-amber-300'
                     }`}>
                       {tx.status || '—'}
                     </div>
@@ -700,7 +847,7 @@ export default function ProviderDashboard() {
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-red-500 to-amber-500 flex items-center justify-center mb-2.5">
               <ShieldAlert className="w-5 h-5 text-white" />
             </div>
-            <h2 className="text-base font-semibold">Fraud Alerts</h2>
+            <h2 className="text-base font-bold text-slate-800">Fraud Alerts</h2>
           </div>
           <div className="p-0">
             {lookupFraudAlerts.length === 0 ? (
@@ -720,9 +867,9 @@ export default function ProviderDashboard() {
                     </div>
                   </div>
                   <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
-                    (alert.risk_level || '').toLowerCase() === 'high' ? 'bg-red-500/10 text-red-500' :
-                    (alert.risk_level || '').toLowerCase() === 'medium' ? 'bg-amber-500/10 text-amber-500' :
-                    'bg-emerald-500/10 text-emerald-500'
+                    (alert.risk_level || '').toLowerCase() === 'high' ? 'bg-rose-100 text-rose-700 border border-rose-300' :
+                    (alert.risk_level || '').toLowerCase() === 'medium' ? 'bg-amber-100 text-amber-700 border border-amber-300' :
+                    'bg-emerald-100 text-emerald-700 border border-emerald-300'
                   }`}>
                     {alert.risk_level || 'low'}
                   </span>
@@ -740,31 +887,33 @@ export default function ProviderDashboard() {
         {activePage === 'users' && (
           <div>
             <div className="mb-6 text-center">
-              <h1 className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
+              <h1 className="text-2xl font-bold text-slate-900">
                 All Users
               </h1>
-              <p className="mt-1 text-sm text-slate-500">System user management</p>
+              <p className="mt-1 text-sm text-slate-600">System user management</p>
             </div>
             <Card>
               <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
                 <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500 to-sky-500 flex items-center justify-center mb-2.5">
                   <Users className="w-5 h-5 text-white" />
                 </div>
-                <h2 className="text-base font-semibold">User Registry</h2>
+                <h2 className="text-base font-bold text-slate-800">User Registry</h2>
               </div>
               <div className="p-0">
                 {users.length === 0 ? (
-                  <div className="p-10 text-sm text-center text-slate-500">Loading users...</div>
+                  <div className="p-10 text-sm text-center text-slate-500">Loading customers...</div>
                 ) : (
                   users.map((user) => (
-                    <div key={user.phone_number} className="flex items-center justify-between p-4 text-xs border-b border-slate-300">
+                    <div key={user.phone_number} className="flex items-center justify-between p-4 text-xs border-b border-slate-200 hover:bg-slate-50 transition-colors">
                       <div>
-                        <div className="font-semibold">{user.full_name || '—'}</div>
-                        <div className="font-mono text-slate-500">{user.phone_number || '—'}</div>
+                        <div className="font-semibold text-slate-900">{user.full_name || '—'}</div>
+                        <div className="font-mono text-slate-500 mt-0.5">{user.phone_number || '—'}</div>
                       </div>
-                      <div className="text-right">
-                        <div className="font-mono font-semibold">{fmtRWF(user.account_balance || 0)}</div>
-                        <div className="text-slate-500">{user.is_active ? 'Active' : 'Inactive'}</div>
+                      <div className="text-right flex flex-col items-end gap-1">
+                        <div className="font-mono font-bold text-emerald-700">{fmtRWF(user.account_balance || 0)}</div>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
+                          user.is_active ? 'bg-emerald-100 text-emerald-700 border-emerald-300' : 'bg-rose-100 text-rose-700 border-rose-300'
+                        }`}>{user.is_active ? 'Active' : 'Inactive'}</span>
                       </div>
                     </div>
                   ))
@@ -778,10 +927,10 @@ export default function ProviderDashboard() {
         {activePage === 'travel' && (
           <div>
             <div className="mb-6 text-center">
-              <h1 className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
+              <h1 className="text-2xl font-bold text-slate-900">
                 Travel Control
               </h1>
-              <p className="mt-1 text-sm text-slate-500">Manage user travel registrations and SIM blocking</p>
+              <p className="mt-1 text-sm text-slate-600">Manage user travel registrations and SIM blocking</p>
             </div>
             
             <div className="grid grid-cols-2 gap-6">
@@ -790,7 +939,7 @@ export default function ProviderDashboard() {
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-500 to-red-500 flex items-center justify-center mb-2.5">
                     <Send className="w-5 h-5 text-white" />
                   </div>
-                  <h2 className="text-base font-semibold">Register Travel</h2>
+                  <h2 className="text-base font-bold text-slate-800">Register Travel</h2>
                   <p className="text-xs text-slate-500 mt-0.5">Block SIM when user travels abroad</p>
                 </div>
                 <div className="p-6">
@@ -851,7 +1000,7 @@ export default function ProviderDashboard() {
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-sky-500 flex items-center justify-center mb-2.5">
                     <RefreshCw className="w-5 h-5 text-white" />
                   </div>
-                  <h2 className="text-base font-semibold">Reactivate on Return</h2>
+                  <h2 className="text-base font-bold text-slate-800">Reactivate on Return</h2>
                   <p className="text-xs text-slate-500 mt-0.5">Re-enable transfers after user returns</p>
                 </div>
                 <div className="p-6">
@@ -891,8 +1040,11 @@ export default function ProviderDashboard() {
                   </div>
                   <Button variant="ghost" onClick={checkTravel} className="justify-center w-full">Check Status</Button>
                   {travelStatus && (
-                    <div className="mt-3 p-2.5 rounded-lg text-xs bg-sky-500/10 text-sky-500 border border-sky-500/20">
-                      {JSON.stringify(travelStatus)}
+                    <div className="mt-3 p-3 rounded-xl text-xs bg-sky-50 text-sky-800 border border-sky-200 space-y-1">
+                      {travelStatus.destination_country && <div><span className="font-semibold">Destination:</span> {travelStatus.destination_country}</div>}
+                      {travelStatus.departure_date && <div><span className="font-semibold">Departed:</span> {fmtDate(travelStatus.departure_date)}</div>}
+                      {travelStatus.return_date && <div><span className="font-semibold">Returns:</span> {fmtDate(travelStatus.return_date)}</div>}
+                      <div><span className="font-semibold">SIM Blocked:</span> {travelStatus.sim_deactivated ? 'Yes' : 'No'}</div>
                     </div>
                   )}
                 </div>

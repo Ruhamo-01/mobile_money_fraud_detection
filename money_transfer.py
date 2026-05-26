@@ -1,17 +1,17 @@
 """
-money_transfer.py — Money Transfer System
+money_transfer.py -- Money Transfer System
 ==========================================
 Flow:
-  1. Validate session → get sender
-  2. Validate recipient phone → detect network (MTN / Tigo)
+  1. Validate session -> get sender
+  2. Validate recipient phone -> detect network (MTN / Airtel)
   3. Validate amount (> 0 only)
-  4. Run RealTimeFraudDetector.evaluate_transaction()   ← ML runs FIRST
-       - ALLOW          → check balance, deduct, complete transfer
-       - REQUIRE_FACE   → return face-verification challenge to frontend
-       - BLOCK          → reject immediately (ML caught it — above balance,
+  4. Run RealTimeFraudDetector.evaluate_transaction()   <- ML runs FIRST
+       - ALLOW          -> check balance, deduct, complete transfer
+       - REQUIRE_FACE   -> return face-verification challenge to frontend
+       - BLOCK          -> reject immediately (ML caught it -- above balance,
                           drain, rapid transfers, etc.)
   5. Balance check ONLY happens after ML says ALLOW
-  6. If caller supplies face_base64 on retry → fraud check runs again
+  6. If caller supplies face_base64 on retry -> fraud check runs again
      with the image, resolves to ALLOW or BLOCK
 """
 
@@ -80,8 +80,7 @@ class MoneyTransferSystem:
             )
         ''')
 
-        # Seed fees once
-        c.execute("DELETE FROM network_fees")
+        # Seed fees once -- only if table is empty
         c.execute("SELECT COUNT(*) FROM network_fees")
         if c.fetchone()[0] == 0:
             c.executemany('''
@@ -93,10 +92,10 @@ class MoneyTransferSystem:
                 ("MTN",  1001,     10000,      "fixed",     100,   0.0),
                 ("MTN",  10001,    150000,     "fixed",     250,   0.0),
                 ("MTN",  150001,   2000000,    "fixed",    1500,   0.0),
-                ("Tigo", 1,        1000,       "fixed",      20,   0.0),
-                ("Tigo", 1001,     10000,      "fixed",     100,   0.0),
-                ("Tigo", 10001,    150000,     "fixed",     250,   0.0),
-                ("Tigo", 150001,   2000000,    "fixed",    1500,   0.0),
+                ("Airtel", 1,        1000,       "fixed",      20,   0.0),
+                ("Airtel", 1001,     10000,      "fixed",     100,   0.0),
+                ("Airtel", 10001,    150000,     "fixed",     250,   0.0),
+                ("Airtel", 150001,   2000000,    "fixed",    1500,   0.0),
             ])
 
         try:
@@ -145,7 +144,6 @@ class MoneyTransferSystem:
         if row:
             attempt_count, last_attempt = row
             # Convert last_attempt to date and compare with today
-            from datetime import datetime
             last_date = last_attempt.date() if hasattr(last_attempt, 'date') else datetime.strptime(str(last_attempt)[:19], "%Y-%m-%d %H:%M:%S").date()
             today = datetime.now().date()
             
@@ -206,7 +204,7 @@ class MoneyTransferSystem:
         if re.match(r'^(78|79)\d{7}$', core):
             return {"valid": True,  "phone": f"+250{core}", "network": "MTN"}
         if re.match(r'^(72|73)\d{7}$', core):
-            return {"valid": True,  "phone": f"+250{core}", "network": "Tigo"}
+            return {"valid": True,  "phone": f"+250{core}", "network": "Airtel"}
         return {"valid": False, "phone": phone, "network": None}
 
     def _calculate_fee(self, network: str, amount: float) -> float:
@@ -265,7 +263,7 @@ class MoneyTransferSystem:
                     "success": False,
                     "action": "BLOCK",
                     "error": (
-                        f"✈️ Your SIM is blocked while you are abroad in "
+                        f"Your SIM is blocked while you are abroad in "
                         f"{travel_row[0]}. Transfers are disabled until your "
                         f"return on {travel_row[1]}. "
                         f"Contact your service provider if you are already back."
@@ -279,12 +277,11 @@ class MoneyTransferSystem:
         if not recipient["valid"]:
             return {"success": False,
                     "error": ("Invalid recipient phone number. "
-                              "Use 078, 079 (MTN) or 072, 073 (Tigo) format.")}
+                              "Use 078, 079 (MTN) or 072, 073 (Airtel) format.")}
 
         # ── 2b. Recipient travel block check ─────────────────────────────
         try:
-            import datetime as _dt
-            _today = _dt.date.today().isoformat()
+            _today = datetime.now().date().isoformat()
             _conn = self.get_connection()
             _c = _conn.cursor()
             _c.execute("""
@@ -301,7 +298,7 @@ class MoneyTransferSystem:
                     "success": False,
                     "action": "BLOCK",
                     "error": (
-                        f"✈️ This recipient is currently abroad in {_rec_travel[0]} "
+                        f"This recipient is currently abroad in {_rec_travel[0]} "
                         f"and cannot receive transfers until {_rec_travel[1]}. "
                         f"Their SIM is blocked for travel security."
                     )
@@ -309,7 +306,7 @@ class MoneyTransferSystem:
         except Exception:
             pass
 
-        # ── 3. Basic input validation (not a rule — just math) ─────────────
+        # ── 3. Basic input validation (not a rule -- just math) ─────────────
         if not isinstance(amount, (int, float)) or amount <= 0:
             return {"success": False, "error": "Amount must be greater than 0."}
 
@@ -318,10 +315,10 @@ class MoneyTransferSystem:
 
         # ── 3b. Over-balance attempt gating ──────────────────────────────
         # Rules (applied BEFORE ML to avoid unnecessary model call):
-        #   1st attempt with amount > balance  → show "insufficient balance", done.
+        #   1st attempt with amount > balance  -> show "insufficient balance", done.
         #   2nd attempt:
-        #     - amount still > balance          → hard block, no face needed.
-        #     - amount now within balance       → mark user untrusted, pass to ML
+        #     - amount still > balance          -> hard block, no face needed.
+        #     - amount now within balance       -> mark user untrusted, pass to ML
         #                                         which will REQUIRE_FACE.
         #   Successful transfer resets counter.
         balance_now = self._get_balance(user["id"])
@@ -329,7 +326,7 @@ class MoneyTransferSystem:
 
         if amount > balance_now:
             if over_balance_count == 0:
-                # First offence — soft message only, track it, return early.
+                # First offence -- soft message only, track it, return early.
                 self._increment_over_balance(user["id"])
                 return {
                     "success": False,
@@ -341,7 +338,7 @@ class MoneyTransferSystem:
                     )
                 }
             else:
-                # Second (or more) offence and amount STILL over balance → hard block.
+                # Second (or more) offence and amount STILL over balance -> hard block.
                 self._increment_over_balance(user["id"])
                 return {
                     "success": False,
@@ -356,15 +353,15 @@ class MoneyTransferSystem:
             # Amount is within balance. Did the user PREVIOUSLY go over-balance?
             if over_balance_count > 0:
                 # Previous attempt was over balance; amount now OK but user is untrusted.
-                # Let ML handle it — pass `untrusted=True` so it forces REQUIRE_FACE
+                # Let ML handle it -- pass `untrusted=True` so it forces REQUIRE_FACE
                 # regardless of ML score.
                 untrusted_flag = True
             else:
                 untrusted_flag = False
 
-        # ── 4. ML model — sole decision maker ────────────────────────────
+        # ── 4. ML model -- sole decision maker ────────────────────────────
         # No hard rules. The model decides everything: velocity bursts,
-        # amount spikes, drain patterns — all learned from data.
+        # amount spikes, drain patterns -- all learned from data.
         # Over-balance hard rules are handled above; untrusted flag forces face.
         fraud_result = self.fraud_det.evaluate_transaction(
             phone_number    = user["phone"],
@@ -384,6 +381,12 @@ class MoneyTransferSystem:
 
         # ── 4a. Face verification required ───────────────────────────────
         if action == "REQUIRE_FACE":
+            # Include XAI explanation so the frontend can show why
+            try:
+                explanation = self.fraud_det.explain_transaction(
+                    user["phone"], amount, recipient["network"])
+            except Exception:
+                explanation = None
             return {
                 "success"      : False,
                 "face_required": True,
@@ -392,6 +395,7 @@ class MoneyTransferSystem:
                 "fraud_score"  : fraud_score,
                 "message"      : fraud_result["message"],
                 "alert"        : fraud_result.get("alert"),
+                "explanation"  : explanation,
             }
 
         # ── 4b. Blocked by ML model ───────────────────────────────────────
@@ -422,7 +426,7 @@ class MoneyTransferSystem:
                 "alert"      : fraud_result.get("alert"),
             }
 
-        # ── 5. Final balance check (safety net — ML should have caught issues above) ──
+        # ── 5. Final balance check (safety net -- ML should have caught issues above) ──
         balance = self._get_balance(user["id"])
         if balance < total:
             # Shouldn't reach here for 1x (handled before ML) or 2x+ (ML blocks)
@@ -458,7 +462,7 @@ class MoneyTransferSystem:
         conn.commit()
         conn.close()
 
-        # Reset over-balance counter — legitimate transfer completed.
+        # Reset over-balance counter -- legitimate transfer completed.
         self._reset_over_balance(user["id"])
 
         self._record_transfer(

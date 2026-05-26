@@ -1,5 +1,5 @@
 """
-fraud_detection.py — Mobile Money Fraud Detection System
+fraud_detection.py -- Mobile Money Fraud Detection System
 =========================================================
 Classes:
   - UserRegistrationSystem   : register users with face encoding
@@ -38,7 +38,7 @@ class UserRegistrationSystem:
         conn = self.get_connection()
         c = conn.cursor()
 
-        # Main users table — phone ↔ name ↔ face mapping
+        # Main users table -- phone ↔ name ↔ face mapping
         c.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id                  SERIAL PRIMARY KEY,
@@ -156,19 +156,18 @@ class UserRegistrationSystem:
                 "complete": False,
                 "missing" : missing,
                 "error"   : (
-                    f"Incomplete face detected — these features are not visible: {parts_str}. "
+                    f"Incomplete face detected -- these features are not visible: {parts_str}. "
                     "Please ensure your full face (eyes, nose, mouth) is clearly visible, "
                     "well-lit, and facing the camera directly."
                 )
             }
         return {"complete": True, "missing": [], "error": None}
 
-    def validate_face_quality_only(self, base64_str: str) -> dict:
+    def _get_face_encoding(self, base64_str: str) -> dict:
         """
-        Run all quality checks (brightness, size, landmarks, eyes, upright)
-        and return encoding bytes — but NEVER save to disk or DB.
-        Used by /api/validate-face for Reset PIN and fraud face gate.
-        Returns { encoding: bytes|None, error: str|None, face_count, face_size }
+        Single authoritative method to extract a 128-dim face encoding from a
+        base64 image. Used by ALL face verification paths.
+        Returns: { encoding: np.ndarray|None, error: str|None, face_count: int }
         """
         try:
             import face_recognition
@@ -177,90 +176,98 @@ class UserRegistrationSystem:
 
             img_bytes = base64.b64decode(base64_str)
             img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+
+            # Upscale small images for reliable detection
+            w, h = img.size
+            if w < 320 or h < 240:
+                scale = max(320 / w, 240 / h)
+                img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
             img_array = np.array(img)
 
-            avg_brightness = img_array.mean()
-            if avg_brightness < 30:
-                return {"encoding": None, "error": "Image is too dark. Please improve lighting and try again.", "face_count": 0}
-            if avg_brightness > 245:
-                return {"encoding": None, "error": "Image is overexposed. Reduce lighting or move away from direct light.", "face_count": 0}
+            # Brightness check
+            avg = img_array.mean()
+            if avg < 25:
+                return {"encoding": None, "error": "Image is too dark. Please improve lighting.", "face_count": 0}
+            if avg > 248:
+                return {"encoding": None, "error": "Image is overexposed. Reduce lighting.", "face_count": 0}
 
-            face_locations = face_recognition.face_locations(img_array, model="hog")
-            if not face_locations:
-                return {"encoding": None, "error": "No face detected. Ensure your face is centred, well-lit, and not obscured.", "face_count": 0}
-            if len(face_locations) > 1:
-                return {"encoding": None, "error": "Multiple faces detected. Only your face should be in the frame.", "face_count": len(face_locations)}
+            # Detect face with upsampling
+            locs = face_recognition.face_locations(img_array, model="hog", number_of_times_to_upsample=2)
+            if not locs:
+                # Fallback: 2x upscale
+                img_up = img.resize((img.width * 2, img.height * 2), Image.LANCZOS)
+                locs_up = face_recognition.face_locations(np.array(img_up), model="hog", number_of_times_to_upsample=1)
+                if locs_up:
+                    locs = [(t//2, r//2, b//2, l//2) for t, r, b, l in locs_up]
+                else:
+                    return {"encoding": None, "error": "No face detected. Ensure your face is centred, well-lit, and not obscured.", "face_count": 0}
 
-            top, right, bottom, left = face_locations[0]
-            face_width  = right - left
-            face_height = bottom - top
-            if face_width < 80 or face_height < 80:
-                return {"encoding": None, "error": f"Face too small ({face_width}×{face_height}px). Move closer to the camera.", "face_count": 1}
+            if len(locs) > 1:
+                return {"encoding": None, "error": "Multiple faces detected. Only your face should be in the frame.", "face_count": len(locs)}
 
-            img_h, img_w = img_array.shape[:2]
-            if (face_width * face_height) / (img_w * img_h) < 0.08:
-                return {"encoding": None, "error": "Face too far from camera. Move closer so your face fills the frame.", "face_count": 1}
+            encs = face_recognition.face_encodings(img_array, locs)
+            if not encs:
+                return {"encoding": None, "error": "Could not generate face encoding. Try again with better lighting.", "face_count": 1}
 
-            margin = 10
-            if top < margin or left < margin or right > img_w - margin or bottom > img_h - margin:
-                return {"encoding": None, "error": "Face is too close to the edge. Centre your face in the frame.", "face_count": 1}
-
-            all_landmarks = face_recognition.face_landmarks(img_array, face_locations)
-            if not all_landmarks:
-                return {"encoding": None, "error": "Could not detect facial landmarks. Face the camera directly.", "face_count": 1}
-
-            lm_check = self._check_face_completeness(all_landmarks[0])
-            if not lm_check["complete"]:
-                return {"encoding": None, "error": lm_check["error"], "face_count": 1}
-
-            lm = all_landmarks[0]
-            def _eye_open(pts):
-                if not pts or len(pts) < 4: return 1.0
-                xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
-                w = max(xs) - min(xs); h = max(ys) - min(ys)
-                return h / w if w > 0 else 1.0
-
-            if _eye_open(lm.get("left_eye", [])) < 0.10 and _eye_open(lm.get("right_eye", [])) < 0.10:
-                return {"encoding": None, "error": "Eyes appear closed. Look directly at the camera with eyes open.", "face_count": 1}
-
-            nose_pts = lm.get("nose_tip", []); chin_pts = lm.get("chin", [])
-            if nose_pts and chin_pts:
-                nose_y = sum(p[1] for p in nose_pts) / len(nose_pts)
-                chin_y = sum(p[1] for p in chin_pts) / len(chin_pts)
-                if chin_y < nose_y:
-                    return {"encoding": None, "error": "Hold your head upright and face the camera directly.", "face_count": 1}
-
-            encodings = face_recognition.face_encodings(img_array, face_locations)
-            if not encodings:
-                return {"encoding": None, "error": "Failed to generate face encoding. Try again with better lighting.", "face_count": 1}
-
-            # Return encoding bytes — no disk write
-            return {
-                "encoding": encodings[0].tobytes(),
-                "error": None,
-                "face_count": 1,
-                "face_size": f"{face_width}×{face_height}",
-            }
+            return {"encoding": encs[0], "error": None, "face_count": 1}
 
         except ImportError:
-            return {
-                "encoding": None,
-                "error": (
-                    "Face recognition library is not installed on this server. "
-                    "Face verification is unavailable — action blocked for security. "
-                    "Please contact support."
-                ),
-                "face_count": 0,
-            }
+            return {"encoding": None, "error": "Face recognition library is not available. Contact support.", "face_count": 0}
         except Exception as e:
             return {"encoding": None, "error": f"Image processing error: {e}", "face_count": 0}
+
+    def _decode_stored_encoding(self, stored_bytes_raw) -> np.ndarray | None:
+        """
+        Robustly decode a stored face encoding from the DB.
+        Handles: float64 (1024 bytes), float32 (512 bytes), legacy JPEG bytes.
+        Returns a 128-dim np.ndarray or None on failure.
+        """
+        try:
+            import face_recognition
+            import io
+            from PIL import Image
+
+            stored_bytes = bytes(stored_bytes_raw)
+            if len(stored_bytes) == 1024:
+                enc = np.frombuffer(stored_bytes, dtype=np.float64)
+                if len(enc) == 128:
+                    return enc
+            if len(stored_bytes) == 512:
+                enc = np.frombuffer(stored_bytes, dtype=np.float32).astype(np.float64)
+                if len(enc) == 128:
+                    return enc
+            # Legacy: raw JPEG -- re-extract
+            stored_img = Image.open(io.BytesIO(stored_bytes)).convert("RGB")
+            stored_encs = face_recognition.face_encodings(np.array(stored_img))
+            if stored_encs:
+                return stored_encs[0]
+            return None
+        except Exception:
+            return None
+
+    def validate_face_quality_only(self, base64_str: str) -> dict:
+        """
+        Validate face quality and return a real 128-dim encoding.
+        Uses face_recognition (same library as all other verification paths).
+        Returns { encoding: bytes|None, error: str|None, face_count, face_size }
+        """
+        result = self._get_face_encoding(base64_str)
+        if result["error"]:
+            return {"encoding": None, "error": result["error"],
+                    "face_count": result["face_count"], "face_size": None}
+        return {
+            "encoding"  : result["encoding"].tobytes(),
+            "error"     : None,
+            "face_count": 1,
+            "face_size" : "detected",
+        }
 
     def extract_face_encoding_from_base64(self, base64_str: str):
         """
         Extract a face encoding from a base64-encoded image string.
         Requirements enforced:
           1. Exactly one face detected.
-          2. Face large enough (≥80×80 px) — quality check.
+          2. Face large enough (≥60x60 px) -- quality check.
           3. All facial landmarks visible: eyes, eyebrows, nose, mouth, chin.
           4. Image saved to uploads/ folder AND encoding stored in DB.
         Returns dict with encoding data, image save path, and validation info.
@@ -275,34 +282,48 @@ class UserRegistrationSystem:
 
             img_bytes = base64.b64decode(base64_str)
             img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+
+            # Upscale small images so HOG model can detect faces reliably
+            w, h = img.size
+            if w < 320 or h < 240:
+                scale = max(320 / w, 240 / h)
+                img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+
             img_array = np.array(img)
 
             # ── 1. Brightness / quality check ────────────────────────────
             avg_brightness = img_array.mean()
-            if avg_brightness < 30:
+            if avg_brightness < 25:
                 return {
                     "encoding": None, "image_path": None,
                     "error": "Image is too dark. Please improve lighting and try again.",
                     "face_count": 0
                 }
-            if avg_brightness > 245:
+            if avg_brightness > 248:
                 return {
                     "encoding": None, "image_path": None,
                     "error": "Image is overexposed (too bright). Reduce lighting or move away from direct light.",
                     "face_count": 0
                 }
 
-            # ── 2. Detect face locations ──────────────────────────────────
-            face_locations = face_recognition.face_locations(img_array, model="hog")
+            # ── 2. Detect face locations with upsampling ──────────────────
+            face_locations = face_recognition.face_locations(img_array, model="hog", number_of_times_to_upsample=2)
             if not face_locations:
-                return {
-                    "encoding": None, "image_path": None,
-                    "error": (
-                        "No face detected. Please ensure your face is centered, "
-                        "well-lit, and not obscured by glasses, mask, or hair."
-                    ),
-                    "face_count": 0
-                }
+                # Fallback: try with 2x upscaled image
+                img_up = img.resize((img.width * 2, img.height * 2), Image.LANCZOS)
+                img_array_up = np.array(img_up)
+                face_locations_up = face_recognition.face_locations(img_array_up, model="hog", number_of_times_to_upsample=1)
+                if face_locations_up:
+                    face_locations = [(t//2, r//2, b//2, l//2) for t, r, b, l in face_locations_up]
+                else:
+                    return {
+                        "encoding": None, "image_path": None,
+                        "error": (
+                            "No face detected. Please ensure your face is centered, "
+                            "well-lit, and not obscured by glasses, mask, or hair."
+                        ),
+                        "face_count": 0
+                    }
             if len(face_locations) > 1:
                 return {
                     "encoding": None, "image_path": None,
@@ -314,12 +335,12 @@ class UserRegistrationSystem:
             top, right, bottom, left = face_locations[0]
             face_width  = right - left
             face_height = bottom - top
-            min_face_px = 80
+            min_face_px = 60
             if face_width < min_face_px or face_height < min_face_px:
                 return {
                     "encoding": None, "image_path": None,
                     "error": (
-                        f"Face is too small ({face_width}×{face_height} px). "
+                        f"Face is too small ({face_width}x{face_height} px). "
                         "Move closer to the camera so your face fills more of the frame."
                     ),
                     "face_count": 1
@@ -328,7 +349,7 @@ class UserRegistrationSystem:
             # ── 4a. Face must cover enough of the image (not too far away) ─
             img_h, img_w = img_array.shape[:2]
             face_area_ratio = (face_width * face_height) / (img_w * img_h)
-            if face_area_ratio < 0.08:
+            if face_area_ratio < 0.04:
                 return {
                     "encoding": None, "image_path": None,
                     "error": (
@@ -339,7 +360,7 @@ class UserRegistrationSystem:
                 }
 
             # ── 4b. Face must not be clipped at image edge ────────────────
-            margin = 10  # pixels
+            margin = 5  # pixels
             if top < margin or left < margin or right > img_w - margin or bottom > img_h - margin:
                 return {
                     "encoding": None, "image_path": None,
@@ -350,7 +371,7 @@ class UserRegistrationSystem:
                     "face_count": 1
                 }
 
-            # ── 4c. Landmark completeness — eyes, nose, mouth must be visible ──
+            # ── 4c. Landmark completeness -- eyes, nose, mouth must be visible ──
             all_landmarks = face_recognition.face_landmarks(img_array, face_locations)
             if not all_landmarks:
                 return {
@@ -370,7 +391,7 @@ class UserRegistrationSystem:
                     "face_count": 1
                 }
 
-            # ── 4d. Eyes must be open — check eye height ──────────────────
+            # ── 4d. Eyes must be open -- check eye height ──────────────────
             lm = all_landmarks[0]
             def _eye_openness(eye_pts):
                 if not eye_pts or len(eye_pts) < 4:
@@ -393,7 +414,7 @@ class UserRegistrationSystem:
                     "face_count": 1
                 }
 
-            # ── 4e. Face must be roughly upright — chin below nose ────────
+            # ── 4e. Face must be roughly upright -- chin below nose ────────
             nose_pts = lm.get("nose_tip", [])
             chin_pts = lm.get("chin", [])
             if nose_pts and chin_pts:
@@ -428,14 +449,14 @@ class UserRegistrationSystem:
             image_path = os.path.join(uploads_dir, filename)
             img.save(image_path, "JPEG", quality=95)
 
-            print(f"[FaceEncoding] ✅ Face saved → {image_path} | size={face_width}×{face_height}")
+            print(f"[FaceEncoding] [OK] Face saved -> {image_path} | size={face_width}x{face_height}")
 
             return {
                 "encoding"  : encodings[0].tobytes(),
                 "image_path": image_path,
                 "error"     : None,
                 "face_count": 1,
-                "face_size" : f"{face_width}×{face_height}",
+                "face_size" : f"{face_width}x{face_height}",
                 "landmarks" : list(landmark_check["missing"]),
             }
 
@@ -488,18 +509,32 @@ class UserRegistrationSystem:
             # ── Decode and validate live image ────────────────────────────
             img_bytes  = base64.b64decode(base64_str)
             img        = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+
+            # Upscale small images so HOG model can detect faces reliably
+            w, h = img.size
+            if w < 320 or h < 240:
+                scale = max(320 / w, 240 / h)
+                img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+
             img_array  = np.array(img)
 
             # Brightness check
             avg_brightness = img_array.mean()
-            if avg_brightness < 20 or avg_brightness > 245:
+            if avg_brightness < 20 or avg_brightness > 248:
                 return {"verified": False,
                         "error": "Image quality too poor (too dark or too bright). Adjust lighting."}
 
-            # Detect face locations
-            live_locations = face_recognition.face_locations(img_array, model="hog")
+            # Detect face locations with upsampling
+            live_locations = face_recognition.face_locations(img_array, model="hog", number_of_times_to_upsample=2)
             if not live_locations:
-                return {"verified": False, "error": "No face detected in the submitted image."}
+                # Fallback: try with 2x upscaled image
+                img_up = img.resize((img.width * 2, img.height * 2), Image.LANCZOS)
+                img_array_up = np.array(img_up)
+                live_locations_up = face_recognition.face_locations(img_array_up, model="hog", number_of_times_to_upsample=1)
+                if live_locations_up:
+                    live_locations = [(t//2, r//2, b//2, l//2) for t, r, b, l in live_locations_up]
+                else:
+                    return {"verified": False, "error": "No face detected in the submitted image. Ensure good lighting and face the camera directly."}
             if len(live_locations) > 1:
                 return {"verified": False, "error": "Multiple faces detected. Only your face should be visible."}
 
@@ -516,9 +551,36 @@ class UserRegistrationSystem:
             live_enc = live_encs[0]
 
             # ── Source 1: Compare against DB encoding ─────────────────────
-            stored_enc_db = np.frombuffer(stored_encoding_bytes, dtype=np.float64)
-            if len(stored_enc_db) != 128:
-                stored_enc_db = np.frombuffer(stored_encoding_bytes, dtype=np.float32).astype(np.float64)
+            # Robustly decode the stored encoding -- handle both 128-dim float64
+            # vectors AND legacy raw JPEG bytes stored by the fallback path.
+            stored_enc_db = None
+            stored_bytes  = bytes(stored_encoding_bytes)
+
+            # Try float64 first (128 values x 8 bytes = 1024 bytes exactly)
+            if len(stored_bytes) == 1024:
+                stored_enc_db = np.frombuffer(stored_bytes, dtype=np.float64)
+            # Try float32 (128 values x 4 bytes = 512 bytes exactly)
+            elif len(stored_bytes) == 512:
+                stored_enc_db = np.frombuffer(stored_bytes, dtype=np.float32).astype(np.float64)
+            else:
+                # Legacy: stored as raw JPEG -- re-extract the 128-dim encoding
+                try:
+                    import io as _io
+                    from PIL import Image as _PILImage
+                    stored_img   = _PILImage.open(_io.BytesIO(stored_bytes)).convert("RGB")
+                    stored_arr   = np.array(stored_img)
+                    stored_locs  = face_recognition.face_locations(stored_arr, model="hog", number_of_times_to_upsample=2)
+                    if not stored_locs:
+                        return {"verified": False, "error": "Stored face image is unreadable. Please update your face in settings."}
+                    stored_encs = face_recognition.face_encodings(stored_arr, stored_locs)
+                    if not stored_encs:
+                        return {"verified": False, "error": "Could not extract encoding from stored face. Please update your face in settings."}
+                    stored_enc_db = stored_encs[0]
+                except Exception as re_err:
+                    return {"verified": False, "error": f"Stored face data is corrupted. Please update your face in settings. ({re_err})"}
+
+            if stored_enc_db is None or len(stored_enc_db) != 128:
+                return {"verified": False, "error": "Stored face encoding is invalid. Please update your face in settings."}
 
             dist_db  = float(face_recognition.face_distance([stored_enc_db], live_enc)[0])
             match_db = dist_db <= tolerance
@@ -542,7 +604,7 @@ class UserRegistrationSystem:
                     match_file = None
             else:
                 # Handle NULL/empty paths for existing users without saved face images
-                print(f"[FaceVerify] No saved face image available (user registered before image saving) — using DB encoding only")
+                print(f"[FaceVerify] No saved face image available (user registered before image saving) -- using DB encoding only")
 
             # ── Decision ──────────────────────────────────────────────────
             if match_file is not None:
@@ -564,19 +626,19 @@ class UserRegistrationSystem:
 
             if not verified:
                 if match_file is not None and match_db and not match_file:
-                    result["error"] = "Face matched database but not saved image — possible tampering detected."
+                    result["error"] = "Face matched database but not saved image -- possible tampering detected."
                 elif not match_db:
                     result["error"] = "Face does not match registered identity. Verification failed."
 
             return result
 
         except ImportError:
-            print("[FaceVerify] face_recognition not installed — BLOCKING verification, never bypassing")
+            print("[FaceVerify] face_recognition not installed -- BLOCKING verification, never bypassing")
             return {
                 "verified": False,
                 "error": (
                     "Face verification library is not available on this server. "
-                    "Face check cannot be completed — action blocked for security. "
+                    "Face check cannot be completed -- action blocked for security. "
                     "Please contact support."
                 )
             }
@@ -715,7 +777,7 @@ class UserRegistrationSystem:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. TRAVEL MONITORING SYSTEM
-#    When a SIM is registered as abroad → all outgoing transfers are blocked.
+#    When a SIM is registered as abroad -> all outgoing transfers are blocked.
 #    SIM is re-enabled only when user confirms return.
 # ─────────────────────────────────────────────────────────────────────────────
 class TravelMonitoringSystem:
@@ -859,7 +921,7 @@ class TravelMonitoringSystem:
 # 3. TRANSACTION ANOMALY DETECTOR  (rule-based, complements ML model)
 # ─────────────────────────────────────────────────────────────────────────────
 class TransactionAnomalyDetector:
-    ANOMALY_THRESHOLD = 0.65   # above this → face verification required
+    ANOMALY_THRESHOLD = 0.65   # above this -> face verification required
 
     def __init__(self, user_system: UserRegistrationSystem):
         self.user_system = user_system
@@ -893,14 +955,14 @@ class TransactionAnomalyDetector:
                 INSERT INTO transaction_history
                 (user_phone, amount, transaction_type, recipient_phone, fraud_score)
                 VALUES (%s, %s, %s, %s, %s)
-            ''', (phone_number, amount, transaction_type, recipient_phone, score))
+            ''', (phone_number, float(amount), transaction_type, recipient_phone, float(score)))
             conn.commit()
 
             return {
                 "anomaly_score"          : round(score, 4),
                 "is_anomalous"           : is_anomalous,
                 "requires_verification"  : is_anomalous,
-                "message"                : ("Unusual transaction pattern detected — "
+                "message"                : ("Unusual transaction pattern detected -- "
                                             "face verification required."
                                             if is_anomalous else "Normal transaction pattern.")
             }
@@ -930,7 +992,7 @@ class TransactionAnomalyDetector:
         if amount >= 50_000 and amount % 50_000 == 0:
             score = min(score + 0.10, 1.0)
 
-        # Very late-night transaction (midnight–4am)
+        # Very late-night transaction (midnight-4am)
         hour = datetime.now().hour
         if hour < 4 or hour >= 23:
             score = min(score + 0.10, 1.0)
@@ -940,13 +1002,14 @@ class TransactionAnomalyDetector:
     def get_user_transaction_pattern(self, phone_number: str, days: int = 30) -> dict | None:
         conn = self.get_connection()
         c = conn.cursor()
+        # Use last 20 completed transactions (not time-based) for a stable baseline
         c.execute('''
             SELECT amount, transaction_type, timestamp
             FROM transaction_history
             WHERE user_phone = %s
-              AND timestamp >= NOW() - INTERVAL '1 day' * %s
-            ORDER BY timestamp
-        ''', (phone_number, days))
+            ORDER BY timestamp DESC
+            LIMIT 20
+        ''', (phone_number,))
         rows = c.fetchall()
         conn.close()
         if not rows:
@@ -954,11 +1017,12 @@ class TransactionAnomalyDetector:
         df = pd.DataFrame(rows, columns=["amount", "type", "timestamp"])
         df["timestamp"] = pd.to_datetime(df["timestamp"])
         return {
-            "avg_amount"       : df["amount"].mean(),
-            "max_amount"       : df["amount"].max(),
-            "min_amount"       : df["amount"].min(),
+            "avg_amount"       : float(df["amount"].mean()),
+            "median_amount"    : float(df["amount"].median()),
+            "max_amount"       : float(df["amount"].max()),
+            "min_amount"       : float(df["amount"].min()),
             "transaction_count": len(df),
-            "daily_avg"        : df.groupby(df["timestamp"].dt.date).size().mean(),
+            "daily_avg"        : float(df.groupby(df["timestamp"].dt.date).size().mean()),
         }
 
 
@@ -1011,7 +1075,7 @@ class PinMonitoringSystem:
 
         if recent_fail >= 2:
             return {"requires_verification": True, "risk_level": "high",
-                    "message": "Multiple rapid PIN failures — possible SIM theft."}
+                    "message": "Multiple rapid PIN failures -- possible SIM theft."}
         elif hour_fail >= 3:
             return {"requires_verification": True, "risk_level": "medium",
                     "message": "Repeated PIN failures in last hour."}
@@ -1086,8 +1150,9 @@ class FraudAlertSystem:
 
     def raise_alert(self, phone_number: str, amount: float,
                     fraud_score: float, risk_level: str,
-                    action: str, extra_info: str = "") -> dict:
-        """Log a fraud alert and return the alert record."""
+                    action: str, extra_info: str = "",
+                    explanation: dict = None) -> dict:
+        """Log a fraud alert with optional SHAP explanation and return the alert record."""
         msg = (
             f"[FRAUD ALERT] Phone: {phone_number} | "
             f"Amount: {amount:,.0f} RWF | Score: {fraud_score:.3f} | "
@@ -1097,16 +1162,17 @@ class FraudAlertSystem:
         c = conn.cursor()
         c.execute('''
             INSERT INTO fraud_alerts
-            (phone_number, amount, fraud_score, risk_level, action, alert_message)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            (phone_number, amount, fraud_score, risk_level, action, alert_message, explanation)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             RETURNING id
-        ''', (phone_number, amount, fraud_score, risk_level, action, msg))
+        ''', (phone_number, amount, fraud_score, risk_level, action, msg,
+              json.dumps(explanation) if explanation else None))
         alert_id = c.fetchone()[0]
         conn.commit()
         c.close()
         conn.close()
 
-        print(f"\n🚨 {msg}\n")
+        print(f"[FRAUD ALERT] {msg}")
         return {"alert_id": alert_id, "message": msg, "timestamp": datetime.now().isoformat()}
 
     def get_unacknowledged_alerts(self) -> list:
@@ -1114,7 +1180,7 @@ class FraudAlertSystem:
         c = conn.cursor()
         c.execute('''
             SELECT id, phone_number, amount, fraud_score, risk_level,
-                   action, alert_message, created_at
+                   action, alert_message, created_at, explanation
             FROM fraud_alerts WHERE acknowledged = FALSE
             ORDER BY created_at DESC
         ''')
@@ -1123,7 +1189,8 @@ class FraudAlertSystem:
         conn.close()
         return [
             {"id": r[0], "phone": r[1], "amount": r[2], "fraud_score": r[3],
-             "risk_level": r[4], "action": r[5], "message": r[6], "created_at": r[7]}
+             "risk_level": r[4], "action": r[5], "message": r[6], "created_at": r[7],
+             "explanation": r[8]}   # stored at alert-creation time
             for r in rows
         ]
 
@@ -1137,7 +1204,7 @@ class FraudAlertSystem:
         return {"success": True, "alert_id": alert_id}
 
     def update_alert(self, alert_id: int, new_action: str, extra_info: str) -> dict:
-        """Update an existing alert's action and message (e.g. REQUIRE_FACE → BLOCK after face fail)."""
+        """Update an existing alert's action and message (e.g. REQUIRE_FACE -> BLOCK after face fail)."""
         conn = self.get_connection()
         c = conn.cursor()
         # Get existing message and update it
@@ -1196,20 +1263,20 @@ def _build_fraud_reason(phone_number: str, amount: float, ml_score: float,
         if balance > 0:
             ratio = amount / balance
             if ratio >= 2.0:
-                reasons.append(f"Amount is {ratio:.1f}x above balance ({balance:,.0f} RWF) — extreme overspend")
+                reasons.append(f"Amount is {ratio:.1f}x above balance ({balance:,.0f} RWF) -- extreme overspend")
             elif ratio >= 1.0:
-                reasons.append(f"Amount ({amount:,.0f} RWF) exceeds balance ({balance:,.0f} RWF) — insufficient funds attempted twice")
+                reasons.append(f"Amount ({amount:,.0f} RWF) exceeds balance ({balance:,.0f} RWF) -- insufficient funds attempted twice")
             elif ratio >= 0.95:
-                reasons.append(f"Amount drains nearly full balance ({balance:,.0f} RWF) — drain pattern")
+                reasons.append(f"Amount drains nearly full balance ({balance:,.0f} RWF) -- drain pattern")
         elif amount > 0:
             reasons.append(f"Amount {amount:,.0f} RWF attempted with zero balance")
 
         if rapid >= 5:
-            reasons.append(f"{rapid} rapid transfers in last 60 seconds — velocity fraud")
+            reasons.append(f"{rapid} rapid transfers in last 60 seconds -- velocity fraud")
         elif rapid >= 3:
-            reasons.append(f"{rapid} transfers in last 60 seconds — suspicious frequency")
+            reasons.append(f"{rapid} transfers in last 60 seconds -- suspicious frequency")
         elif rapid_5m >= 8:
-            reasons.append(f"{rapid_5m} transfers in last 5 minutes — high frequency")
+            reasons.append(f"{rapid_5m} transfers in last 5 minutes -- high frequency")
 
         if not reasons:
             reasons.append(f"ML model flagged transaction (score={ml_score:.3f})")
@@ -1220,6 +1287,85 @@ def _build_fraud_reason(phone_number: str, amount: float, ml_score: float,
         return f"ML fraud score={ml_score:.3f}"
 
 
+def _build_xai_summary(top_factors: list, fraud_prob: float,
+                        threshold: float) -> str:
+    """Build a plain-English summary of the top SHAP factors."""
+    risk_word = "HIGH" if fraud_prob >= 0.65 else "MEDIUM" if fraud_prob >= threshold else "LOW"
+    lines = [f"Fraud risk: {risk_word} ({fraud_prob*100:.1f}%). "
+             f"Top reasons this transaction was flagged:"]
+    for f in top_factors[:3]:
+        direction = "raised" if f["direction"] == "increases_risk" else "lowered"
+        lines.append(f"• {f['label']} {direction} the risk score "
+                     f"(impact: {abs(f['shap_value']):.3f})")
+    return " ".join(lines)
+
+
+def _rule_based_explanation(features: list, feature_names: list,
+                             feature_labels: dict, fraud_prob: float,
+                             threshold: float) -> dict:
+    """
+    Fallback explanation when SHAP is unavailable.
+    Uses known high-signal features to generate a human-readable explanation.
+    """
+    feat = dict(zip(feature_names, features))
+    reasons = []
+
+    if feat.get("is_amount_spike", 0) == 1:
+        reasons.append({
+            "label"      : "Unusual Amount Spike",
+            "detail"     : f"Amount is {feat.get('amount_vs_typical', 0):.1f}x your typical transaction",
+            "direction"  : "increases_risk",
+            "shap_value" : 0.8,
+        })
+    if feat.get("sender_zero_after", 0) == 1:
+        reasons.append({
+            "label"      : "Account Drained to Zero",
+            "detail"     : "This transfer would empty your entire account balance",
+            "direction"  : "increases_risk",
+            "shap_value" : 0.7,
+        })
+    if feat.get("pin_near_lockout", 0) == 1:
+        reasons.append({
+            "label"      : "PIN Near Lockout",
+            "detail"     : "Multiple recent PIN failures detected on this account",
+            "direction"  : "increases_risk",
+            "shap_value" : 0.6,
+        })
+    if feat.get("amount_exceeds_balance", 0) == 1:
+        reasons.append({
+            "label"      : "Amount Exceeds Balance",
+            "detail"     : "Transfer amount is greater than available balance",
+            "direction"  : "increases_risk",
+            "shap_value" : 0.9,
+        })
+    if feat.get("amount_to_bal_ratio", 0) > 0.8:
+        reasons.append({
+            "label"      : "High Balance Drain Ratio",
+            "detail"     : f"{feat.get('amount_to_bal_ratio', 0)*100:.0f}% of balance being transferred",
+            "direction"  : "increases_risk",
+            "shap_value" : round(float(feat.get("amount_to_bal_ratio", 0)) * 0.5, 4),
+        })
+
+    if not reasons:
+        reasons.append({
+            "label"      : "ML Pattern Detection",
+            "detail"     : f"Transaction pattern scored {fraud_prob*100:.1f}% fraud probability",
+            "direction"  : "increases_risk",
+            "shap_value" : round(fraud_prob, 4),
+        })
+
+    risk_word = "HIGH" if fraud_prob >= 0.65 else "MEDIUM" if fraud_prob >= threshold else "LOW"
+    return {
+        "available"  : True,
+        "method"     : "Rule-Based (SHAP unavailable -- pip install shap)",
+        "fraud_score": round(fraud_prob, 4),
+        "threshold"  : threshold,
+        "top_factors": reasons,
+        "summary"    : f"Fraud risk: {risk_word} ({fraud_prob*100:.1f}%). "
+                       + " | ".join(r["label"] for r in reasons[:3]),
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. REAL-TIME FRAUD DETECTOR  (main engine, used by money_transfer.py)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1228,19 +1374,19 @@ class RealTimeFraudDetector:
     Pipeline:
       1. Check user is active (not abroad, not locked)
       2. ML model score ONLY (trained in Momo_Clean.ipynb, saved as .pkl)
-         — fraud decision comes entirely from the trained model, no hand-written rules
-      3. If HIGH risk  → block + raise alert + require face verification
-         If MEDIUM     → require face verification before proceeding
-         If LOW        → allow
+         -- fraud decision comes entirely from the trained model, no hand-written rules
+      3. If HIGH risk  -> block + raise alert + require face verification
+         If MEDIUM     -> require face verification before proceeding
+         If LOW        -> allow
 
     NOTE: Rule-based anomaly scoring and PIN-risk weighting are intentionally
     NOT used in the fraud decision. The ML model is the sole judge.
     TransactionAnomalyDetector.record_transaction() is still called to LOG
     the transaction to transaction_history (needed for ML feature building),
-    but its anomaly_score does NOT influence the fraud decision — the ML model is the sole judge.
+    but its anomaly_score does NOT influence the fraud decision -- the ML model is the sole judge.
     """
 
-    # Risk thresholds (combined score 0–1)
+    # Risk thresholds (combined score 0-1)
     HIGH_RISK_THRESHOLD   = 0.65
     MEDIUM_RISK_THRESHOLD = 0.40
 
@@ -1258,6 +1404,11 @@ class RealTimeFraudDetector:
         return psycopg2.connect(**self.db_config)
 
     def _load_ml_model(self):
+        self.model     = None
+        self.scaler    = None
+        self.config    = {}
+        self.threshold = 0.5
+        self.explainer = None   # SHAP TreeExplainer -- loaded lazily
         try:
             self.model  = joblib.load("fraud_best_model.pkl")
             self.scaler = joblib.load("fraud_scaler.pkl")
@@ -1266,9 +1417,17 @@ class RealTimeFraudDetector:
             self.threshold = self.config.get("threshold", 0.5)
             print(f"[FraudDetector] ML model loaded: {self.config.get('best_model')} "
                   f"| threshold={self.threshold}")
+            # Pre-load SHAP explainer if available
+            try:
+                import shap
+                self.explainer = shap.TreeExplainer(self.model)
+                print("[FraudDetector] SHAP TreeExplainer loaded -- XAI enabled")
+            except ImportError:
+                print("[FraudDetector] SHAP not installed -- XAI disabled (pip install shap)")
+            except Exception as e:
+                print(f"[FraudDetector] SHAP explainer failed to load: {e}")
         except FileNotFoundError:
-            print("[FraudDetector] ML model not found — using rule-based detection only. "
-                  "Run Momo_Clean.ipynb to train and save the model.")
+            print("[FraudDetector] ML model not found -- using rule-based detection only.")
         except Exception as e:
             print(f"[FraudDetector] Error loading model: {e}")
 
@@ -1277,8 +1436,12 @@ class RealTimeFraudDetector:
     def _build_ml_features(self, phone_number: str, amount: float,
                             network: str) -> list:
         """
-        Build the 14-feature vector that matches Momo_Clean.ipynb FEATURES list.
-        Uses live balance from DB + transaction history.
+        Build the 20-feature vector that matches fraud_config.json FEATURES list:
+        log_amount, log_oldbalanceOrg, log_newbalanceOrig, log_oldbalanceDest,
+        log_newbalanceDest, orig_balance_drop, dest_balance_gain, balance_mismatch,
+        sender_zero_after, dest_zero_before, amount_to_bal_ratio, type_encoded,
+        hour_of_day, is_high_amount, amount_vs_typical, is_amount_spike,
+        pin_near_lockout, amount_exceeds_balance, hard_block_signal, excess_ratio
         """
         # Get live balance
         conn = self.get_connection()
@@ -1286,74 +1449,251 @@ class RealTimeFraudDetector:
         c.execute("SELECT account_balance FROM users WHERE phone_number = %s",
                   (phone_number,))
         row = c.fetchone()
+
+        # Get PIN fail count for pin_near_lockout feature
+        c.execute("SELECT COALESCE(pin_fail_count, 0) FROM users WHERE phone_number = %s",
+                  (phone_number,))
+        pin_row = c.fetchone()
         conn.close()
-        old_balance = row[0] if row else 0.0
-        new_balance = max(old_balance - amount, 0.0)
+
+        old_balance   = row[0] if row else 0.0
+        pin_fail_count = pin_row[0] if pin_row else 0
+        new_balance   = max(old_balance - amount, 0.0)
 
         # Historical pattern
-        pattern = self.anomaly_det.get_user_transaction_pattern(phone_number)
-        avg_amount  = pattern["avg_amount"] if pattern else amount
-        tx_count    = pattern["transaction_count"] if pattern else 0
+        pattern    = self.anomaly_det.get_user_transaction_pattern(phone_number)
+        # Use median as the baseline -- it's robust against outlier large transfers
+        # that would inflate the mean and hide genuine spikes
+        if pattern:
+            avg_amount = pattern.get("median_amount") or pattern["avg_amount"]
+        else:
+            avg_amount = amount
 
         # Derived features
         log_amount          = np.log1p(amount)
         log_old_orig        = np.log1p(old_balance)
         log_new_orig        = np.log1p(new_balance)
-        log_old_dest        = 0.0           # recipient balance unknown
-        log_new_dest        = log_amount    # approximate
+        log_old_dest        = 0.0
+        log_new_dest        = log_amount
         orig_balance_drop   = log_old_orig - log_new_orig
         dest_balance_gain   = log_new_dest - log_old_dest
         balance_mismatch    = orig_balance_drop - dest_balance_gain
         sender_zero_after   = int(new_balance == 0)
-        dest_zero_before    = 0             # unknown
+        dest_zero_before    = 0
         amount_to_bal_ratio = amount / (old_balance + 1)
 
-        # Encode transaction type: TRANSFER=4, CASH_OUT=1 (PaySim encoding)
-        type_map = {"MTN": 4, "Tigo": 4}   # mobile transfers → TRANSFER
+        type_map     = {"MTN": 4, "Airtel": 4}
         type_encoded = type_map.get(network, 4)
-
-        hour_of_day    = datetime.now().hour
+        hour_of_day  = datetime.now().hour
         is_high_amount = int(amount > 100_000)
 
-        # NEW features — learned by ML model
+        # amount_vs_typical: ratio of this amount to user's average (capped at 10)
+        amount_vs_typical = min(amount / (avg_amount + 1), 10.0)
+
+        # is_amount_spike: 1 if amount > 5x user's average
+        is_amount_spike = int(amount > 5 * (avg_amount + 1))
+
+        # pin_near_lockout: 1 if user has 2+ failed PIN attempts (one away from lockout)
+        pin_near_lockout = int(pin_fail_count >= 2)
+
+        # amount_exceeds_balance: 1 if amount > current balance
         amount_exceeds_balance = int(amount > old_balance)
-        excess_ratio           = min(amount / (old_balance + 1), 10)
 
-        # Rapid transfer count: how many transfers in last 60 seconds
-        conn2 = self.get_connection()
-        c2    = conn2.cursor()
-        c2.execute("""
-            SELECT COUNT(*) FROM transaction_history
-            WHERE user_phone = %s
-              AND timestamp >= NOW() - INTERVAL '60 seconds'
-        """, (phone_number,))
-        rapid_tx_count = c2.fetchone()[0]
-        c2.close()
-        conn2.close()
+        # hard_block_signal: 1 if amount > balance AND pin_near_lockout
+        hard_block_signal = int(amount_exceeds_balance and pin_near_lockout)
 
+        # excess_ratio: how much over balance (capped at 10)
+        excess_ratio = min(amount / (old_balance + 1), 10.0)
+
+        # Feature order must match fraud_config.json exactly:
         return [
-            log_amount, log_old_orig, log_new_orig,
-            log_old_dest, log_new_dest,
-            orig_balance_drop, dest_balance_gain, balance_mismatch,
-            sender_zero_after, dest_zero_before, amount_to_bal_ratio,
-            type_encoded, hour_of_day, is_high_amount,
-            amount_exceeds_balance, excess_ratio, rapid_tx_count,
+            log_amount,             # 0  log_amount
+            log_old_orig,           # 1  log_oldbalanceOrg
+            log_new_orig,           # 2  log_newbalanceOrig
+            log_old_dest,           # 3  log_oldbalanceDest
+            log_new_dest,           # 4  log_newbalanceDest
+            orig_balance_drop,      # 5  orig_balance_drop
+            dest_balance_gain,      # 6  dest_balance_gain
+            balance_mismatch,       # 7  balance_mismatch
+            sender_zero_after,      # 8  sender_zero_after
+            dest_zero_before,       # 9  dest_zero_before
+            amount_to_bal_ratio,    # 10 amount_to_bal_ratio
+            type_encoded,           # 11 type_encoded
+            hour_of_day,            # 12 hour_of_day
+            is_high_amount,         # 13 is_high_amount
+            amount_vs_typical,      # 14 amount_vs_typical
+            is_amount_spike,        # 15 is_amount_spike
+            pin_near_lockout,       # 16 pin_near_lockout
+            amount_exceeds_balance, # 17 amount_exceeds_balance
+            hard_block_signal,      # 18 hard_block_signal
+            excess_ratio,           # 19 excess_ratio
         ]
 
     # ── ML scoring ────────────────────────────────────────────────────────
 
     def ml_score(self, phone_number: str, amount: float, network: str) -> float:
-        """Return ML fraud probability (0–1). Falls back to 0.5 on error."""
+        """Return ML fraud probability (0-1). Falls back to 0.5 on error."""
         if not self.model or not self.scaler:
             return 0.5
         try:
+            import warnings
             features = self._build_ml_features(phone_number, amount, network)
             vec      = np.array([features])
-            vec_s    = self.scaler.transform(vec)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                vec_s = self.scaler.transform(vec)
             return float(self.model.predict_proba(vec_s)[0][1])
         except Exception as e:
             print(f"[MLScore] Error: {e}")
             return 0.5
+
+    def explain_transaction(self, phone_number: str, amount: float,
+                             network: str, mode: str = "standard") -> dict:
+        """
+        Generate an explanation for a transaction's fraud score.
+
+        mode="standard"  -> Rule-based (primary) + feature importance (secondary).
+                           Fast, always works. Used for manager fraud alerts.
+        mode="deep"      -> Adds SHAP values on top of standard.
+                           Slower, requires SHAP. Used for admin deep-dive only.
+        """
+        feature_names = self.config.get("features", [
+            "log_amount","log_oldbalanceOrg","log_newbalanceOrig",
+            "log_oldbalanceDest","log_newbalanceDest","orig_balance_drop",
+            "dest_balance_gain","balance_mismatch","sender_zero_after",
+            "dest_zero_before","amount_to_bal_ratio","type_encoded",
+            "hour_of_day","is_high_amount","amount_vs_typical",
+            "is_amount_spike","pin_near_lockout","amount_exceeds_balance",
+            "hard_block_signal","excess_ratio"
+        ])
+
+        feature_labels = {
+            "log_amount"             : "Transaction Amount",
+            "log_oldbalanceOrg"      : "Sender Balance (Before)",
+            "log_newbalanceOrig"     : "Sender Balance (After)",
+            "log_oldbalanceDest"     : "Recipient Balance (Before)",
+            "log_newbalanceDest"     : "Recipient Balance (After)",
+            "orig_balance_drop"      : "Sender Balance Drop",
+            "dest_balance_gain"      : "Recipient Balance Gain",
+            "balance_mismatch"       : "Balance Mismatch",
+            "sender_zero_after"      : "Account Drained to Zero",
+            "dest_zero_before"       : "Recipient Had Zero Balance",
+            "amount_to_bal_ratio"    : "Amount vs. Balance Ratio",
+            "type_encoded"           : "Transaction Type",
+            "hour_of_day"            : "Time of Day",
+            "is_high_amount"         : "High Amount Flag",
+            "amount_vs_typical"      : "Amount vs. Typical Behaviour",
+            "is_amount_spike"        : "Unusual Amount Spike",
+            "pin_near_lockout"       : "PIN Near Lockout",
+            "amount_exceeds_balance" : "Amount Exceeds Balance",
+            "hard_block_signal"      : "Hard Block Signal",
+            "excess_ratio"           : "Excess Ratio",
+        }
+
+        try:
+            features  = self._build_ml_features(phone_number, amount, network)
+            feat_dict = dict(zip(feature_names, features))
+
+            # ── Get fraud probability ─────────────────────────────────────
+            if self.model and self.scaler:
+                import warnings
+                vec = np.array([features])
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    vec_s = self.scaler.transform(vec)
+                fraud_prob = float(self.model.predict_proba(vec_s)[0][1])
+            else:
+                fraud_prob = 0.5
+
+            # ── PRIMARY: Rule-based explanation ───────────────────────────
+            # Always generated -- fast, human-readable, no dependencies
+            rule_exp = _rule_based_explanation(
+                features, feature_names, feature_labels, fraud_prob, self.threshold)
+
+            # ── SECONDARY: Feature importance ─────────────────────────────
+            # Uses model's built-in feature importances -- no SHAP needed
+            feature_importance_factors = []
+            if self.model and hasattr(self.model, 'feature_importances_'):
+                importances = self.model.feature_importances_
+                fi_pairs = sorted(
+                    zip(feature_names, importances, features),
+                    key=lambda x: x[1], reverse=True
+                )
+                for name, imp, raw_val in fi_pairs[:5]:
+                    feature_importance_factors.append({
+                        "feature"    : name,
+                        "label"      : feature_labels.get(name, name),
+                        "importance" : round(float(imp), 4),
+                        "raw_value"  : round(float(raw_val), 4),
+                        "shap_value" : round(float(imp), 4),  # use importance as proxy
+                        "direction"  : "increases_risk" if raw_val > 0 else "decreases_risk",
+                    })
+
+            # Build the standard result
+            # top_factors = rule-based reasons PLUS feature importance to always show 5 bars
+            rule_factors = rule_exp["top_factors"]
+            fi_labels = {f["feature"]: f for f in feature_importance_factors}
+
+            # Merge: rule factors first, then fill with feature importance (no duplicates)
+            seen_labels = {f["label"] for f in rule_factors}
+            combined_factors = list(rule_factors)
+            for fi in feature_importance_factors:
+                if fi["label"] not in seen_labels and len(combined_factors) < 5:
+                    combined_factors.append(fi)
+                    seen_labels.add(fi["label"])
+
+            result = {
+                "available"    : True,
+                "method"       : "Rule-Based + Feature Importance",
+                "fraud_score"  : round(fraud_prob, 4),
+                "threshold"    : self.threshold,
+                "top_factors"  : combined_factors,
+                "feature_importance": feature_importance_factors,
+                "summary"      : rule_exp["summary"],
+                "triggered_rules": {
+                    "amount_spike"        : int(feat_dict.get("is_amount_spike", 0)),
+                    "account_drain"       : int(feat_dict.get("sender_zero_after", 0)),
+                    "pin_near_lockout"    : int(feat_dict.get("pin_near_lockout", 0)),
+                    "exceeds_balance"     : int(feat_dict.get("amount_exceeds_balance", 0)),
+                    "high_drain_ratio"    : int(feat_dict.get("amount_to_bal_ratio", 0) > 0.8),
+                    "amount_vs_typical"   : round(float(feat_dict.get("amount_vs_typical", 0)), 2),
+                },
+            }
+
+            # ── DEEP MODE: Add SHAP (admin only) ─────────────────────────
+            if mode == "deep" and self.explainer is not None and self.model and self.scaler:
+                try:
+                    import warnings
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        shap_values = self.explainer.shap_values(vec_s)
+                    sv = shap_values[1][0] if isinstance(shap_values, list) else shap_values[0]
+                    shap_factors = []
+                    for name, sv_val, raw_val in zip(feature_names, sv, features):
+                        shap_factors.append({
+                            "feature"    : name,
+                            "label"      : feature_labels.get(name, name),
+                            "shap_value" : round(float(sv_val), 4),
+                            "raw_value"  : round(float(raw_val), 4),
+                            "direction"  : "increases_risk" if sv_val > 0 else "decreases_risk",
+                        })
+                    shap_factors.sort(key=lambda x: abs(x["shap_value"]), reverse=True)
+                    result["shap_factors"] = shap_factors[:10]
+                    result["all_factors"]  = shap_factors
+                    result["method"]       = "Rule-Based + Feature Importance + SHAP"
+                    # Override top_factors with SHAP for deep mode
+                    result["top_factors"]  = shap_factors[:5]
+                except Exception as shap_err:
+                    result["shap_error"] = str(shap_err)
+
+            return result
+
+        except Exception as e:
+            return {
+                "available"  : False,
+                "error"      : f"Explanation unavailable: {e}",
+                "fraud_score": 0.5,
+            }
 
     # ── Main check ────────────────────────────────────────────────────────
 
@@ -1367,7 +1707,7 @@ class RealTimeFraudDetector:
           {
             "action"        : "ALLOW" | "REQUIRE_FACE" | "BLOCK",
             "risk_level"    : "LOW"   | "MEDIUM"       | "HIGH",
-            "fraud_score"   : float,  # combined 0–1
+            "fraud_score"   : float,  # combined 0-1
             "ml_score"      : float,
             "rule_score"    : float,
             "face_verified" : bool | None,
@@ -1408,7 +1748,7 @@ class RealTimeFraudDetector:
             return result
         checks["user"] = {"passed": True, "msg": f"Active user: {user['full_name']}"}
 
-        # ── 2. ML is the sole judge — no hard balance-multiplier rule ────
+        # ── 2. ML is the sole judge -- no hard balance-multiplier rule ────
         #   The model was trained on excess_ratio and amount_exceeds_balance
         #   features, so 2x / 3x above balance is detected by ML alone.
         checks["balance_multiplier"] = {"passed": True, "msg": "Delegated to ML model"}
@@ -1416,7 +1756,7 @@ class RealTimeFraudDetector:
         # ── 3. Travel check ───────────────────────────────────────────────
         if self.travel_sys.is_user_abroad(phone_number):
             checks["travel"] = {"passed": False,
-                                 "msg": "User is registered as abroad — transfers blocked."}
+                                 "msg": "User is registered as abroad -- transfers blocked."}
             result.update({"action": "BLOCK", "risk_level": "HIGH",
                            "message": "Transaction blocked: your SIM is deactivated for "
                                       "international travel. Please contact your service "
@@ -1428,24 +1768,26 @@ class RealTimeFraudDetector:
             return result
         checks["travel"] = {"passed": True, "msg": "User is in country"}
 
-        # ── 4. Log transaction to history (needed for ML feature building) ──
-        #   record_transaction() writes to transaction_history so that
-        #   _build_ml_features() can compute avg_amount / tx_count.
-        #   Its anomaly_score is captured for transparency but does NOT
-        #   influence the fraud decision — the ML model is the sole judge.
-        anomaly = self.anomaly_det.record_transaction(
-            phone_number, amount, "TRANSFER", recipient_phone)
-        checks["transaction_logged"] = {
-            "passed": True,
-            "msg"   : "Transaction recorded for ML feature history."
-        }
-
-        # ── 5. ML model score — SOLE fraud decision ───────────────────────
+        # ── 4. ML model score -- SOLE fraud decision ───────────────────────
+        #   Build features BEFORE logging this transaction so avg_amount
+        #   reflects only past history, not the current transaction.
+        #   This ensures amount_vs_typical and is_amount_spike are accurate.
         ml_s = self.ml_score(phone_number, amount, network)
         checks["ml_model"] = {
             "score"    : round(ml_s, 4),
             "threshold": self.threshold,
             "msg"      : f"ML fraud probability: {ml_s:.4f}"
+        }
+
+        # ── 5. Log transaction to history AFTER scoring ───────────────────
+        #   record_transaction() writes to transaction_history for future
+        #   ML feature building. Logging AFTER scoring prevents the current
+        #   transaction from inflating avg_amount before the spike check.
+        anomaly = self.anomaly_det.record_transaction(
+            phone_number, amount, "TRANSFER", recipient_phone)
+        checks["transaction_logged"] = {
+            "passed": True,
+            "msg"   : "Transaction recorded for ML feature history."
         }
 
         # ── 6. Fraud score = ML score only ────────────────────────────────
@@ -1455,13 +1797,39 @@ class RealTimeFraudDetector:
         result["ml_score"]    = round(ml_s, 4)
         result["rule_score"]  = 0.0   # not used in decision
 
-        # ── 7. Risk classification (based on ML score only) ──────────────
+        # ── 7. Risk classification ────────────────────────────────────────
+        # Primary: ML score thresholds
+        # Override: explicit behavioural signals that always require face
+        #   regardless of ML score (the model was trained on PaySim data
+        #   and may not score small-account spikes high enough).
         if combined >= self.HIGH_RISK_THRESHOLD:
             result["risk_level"] = "HIGH"
         elif combined >= self.MEDIUM_RISK_THRESHOLD:
             result["risk_level"] = "MEDIUM"
         else:
             result["risk_level"] = "LOW"
+
+        # ── Behavioural override: force REQUIRE_FACE on clear spike signals ──
+        # Build features to check spike/drain signals directly
+        try:
+            feats = self._build_ml_features(phone_number, amount, network)
+            # feats[15] = is_amount_spike, feats[8] = sender_zero_after
+            is_spike = feats[15]   # 1 if amount > 5x user average
+            is_drain = feats[8]    # 1 if balance would reach zero
+            if is_spike and result["risk_level"] == "LOW":
+                result["risk_level"] = "MEDIUM"
+                checks["behavioural_override"] = {
+                    "reason": "amount_spike",
+                    "msg"   : f"Amount is >5x user average -- face verification required."
+                }
+            elif is_drain and result["risk_level"] == "LOW":
+                result["risk_level"] = "MEDIUM"
+                checks["behavioural_override"] = {
+                    "reason": "account_drain",
+                    "msg"   : "Transfer would drain account to zero -- face verification required."
+                }
+        except Exception:
+            pass  # never block a transaction due to feature-build error
 
         # ── 7b. Untrusted user override ───────────────────────────────────
         # If money_transfer.py flagged this user as untrusted (they previously
@@ -1480,7 +1848,7 @@ class RealTimeFraudDetector:
         # ── 8. Face verification gate ─────────────────────────────────────
         if result["risk_level"] in ("HIGH", "MEDIUM"):
             if face_base64:
-                # User has provided face image — verify it
+                # User has provided face image -- verify it
                 face_result = self.user_reg.verify_face_from_base64(
                     phone_number, face_base64)
                 result["face_verified"] = face_result.get("verified", False)
@@ -1510,16 +1878,21 @@ class RealTimeFraudDetector:
                     pending_id = result.get("_alert_id")
                     if pending_id:
                         self.alert_sys.update_alert(pending_id, "BLOCK",
-                            "Face verification failed — identity could not be confirmed.")
+                            "Face verification failed -- identity could not be confirmed.")
                     else:
                         reason = _build_fraud_reason(phone_number, amount, ml_s, self.db_config)
+                        try:
+                            xai = self.explain_transaction(phone_number, amount, network)
+                        except Exception:
+                            xai = None
                         result["alert"] = self.alert_sys.raise_alert(
                             phone_number, amount, combined,
                             "HIGH", "BLOCK",
-                            f"{reason}. Face verification failed — identity not confirmed.")
+                            f"{reason}. Face verification failed -- identity not confirmed.",
+                            explanation=xai)
                     result["face_failed"] = True
             else:
-                # No face provided yet — ask for it
+                # No face provided yet -- ask for it
                 if untrusted and result["risk_level"] == "MEDIUM":
                     face_msg = (
                         "A previous transfer attempt exceeded your account balance. "
@@ -1536,13 +1909,17 @@ class RealTimeFraudDetector:
                     )
                 result["action"]  = "REQUIRE_FACE"
                 result["message"] = face_msg
-                # Raise a service-provider alert immediately
-                # Build human-readable reason for admin
+                # Raise a service-provider alert -- capture explanation NOW
+                # so the dashboard shows the correct context, not a re-score later
                 reason = _build_fraud_reason(phone_number, amount, ml_s, self.db_config)
+                try:
+                    xai = self.explain_transaction(phone_number, amount, network)
+                except Exception:
+                    xai = None
                 result["alert"] = self.alert_sys.raise_alert(
                     phone_number, amount, combined,
                     result["risk_level"], "REQUIRE_FACE",
-                    reason)
+                    reason, explanation=xai)
                 result["_alert_id"] = result["alert"].get("alert_id") if result["alert"] else None
         else:
             result["action"]  = "ALLOW"

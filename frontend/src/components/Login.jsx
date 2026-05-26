@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Shield, Camera, Check, RefreshCw, UserPlus, AlertTriangle, X } from 'lucide-react';
 
-const API = 'http://localhost:5000';
+const API = '';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -86,6 +86,8 @@ export default function Login() {
       setStream(mediaStream);
       if (faceVideoRef.current) {
         faceVideoRef.current.srcObject = mediaStream;
+        // Mirror video for natural selfie UX — canvas does NOT mirror
+        faceVideoRef.current.style.transform = 'scaleX(-1)';
       }
       setFaceCaptured(false);
       setFaceBase64(null);
@@ -110,23 +112,20 @@ export default function Login() {
     const video = faceVideoRef.current;
     const canvas = faceCanvasRef.current;
     if (!video || !canvas) return;
-    
-    canvas.width = video.videoWidth || 1280;
+
+    // Draw at native resolution — NO mirror (video CSS handles the mirror display)
+    canvas.width  = video.videoWidth  || 1280;
     canvas.height = video.videoHeight || 720;
     const ctx = canvas.getContext('2d');
-    ctx.translate(canvas.width, 0);
-    ctx.scale(-1, 1);
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    
-    // Quality check
+
+    // Brightness check
     const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
     let total = 0;
-    for (let i = 0; i < data.length; i += 4) {
+    for (let i = 0; i < data.length; i += 4)
       total += 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
-    }
     const avg = total / (data.length / 4);
-    
+
     if (avg < 30) {
       setQualityWarn({ show: true, message: '⚠️ Image too dark — move to a brighter area and try again.' });
       return;
@@ -135,18 +134,21 @@ export default function Login() {
       setQualityWarn({ show: true, message: '⚠️ Image too bright — reduce glare or move away from direct light.' });
       return;
     }
-    
+
     setQualityWarn({ show: false, message: '' });
+
+    // Scale to 800px wide for reliable face detection
     const scaled = document.createElement('canvas');
-    scaled.width = 480;
-    scaled.height = Math.round(canvas.height * 480 / canvas.width);
+    scaled.width  = 800;
+    scaled.height = Math.round(canvas.height * 800 / canvas.width);
     scaled.getContext('2d').drawImage(canvas, 0, 0, scaled.width, scaled.height);
-    const base64 = scaled.toDataURL('image/jpeg', 0.7).split(',')[1];
+    const base64 = scaled.toDataURL('image/jpeg', 0.92).split(',')[1];
+
     setFaceBase64(base64);
     setFaceCaptured(true);
     stopCamera();
-    
-    // Validate face
+
+    // Validate face with backend
     setFaceValidating(true);
     validateFaceCapture(base64);
   };
@@ -158,20 +160,23 @@ export default function Login() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ face_base64: base64Image })
       });
-      
+
+      // Parse JSON regardless of HTTP status so we always get the error message
       const result = await response.json();
-      
-      if ((result.success || result.face_detected) && result.face_count > 0) {
+
+      if (response.ok && (result.success || result.face_detected) && result.face_count > 0) {
         setFaceValid(true);
         setQualityWarn({ show: false, message: '' });
       } else {
         setFaceValid(false);
-        setQualityWarn({ show: true, message: result.error || '❌ No face detected. Please ensure your face is clearly visible and try again.' });
+        const msg = result.error || result.message || 'No face detected. Please ensure your face is clearly visible and try again.';
+        setQualityWarn({ show: true, message: `❌ ${msg}` });
       }
     } catch (error) {
-      console.error('Face validation error:', error);
+      // Only reaches here on a true network failure (server down, CORS, etc.)
+      console.error('Face validation network error:', error);
       setFaceValid(false);
-      setQualityWarn({ show: true, message: 'Error validating face. Please try again.' });
+      setQualityWarn({ show: true, message: '❌ Could not reach the server. Make sure the backend is running and try again.' });
     } finally {
       setFaceValidating(false);
     }
@@ -342,7 +347,7 @@ export default function Login() {
           <h1 className="text-2xl font-bold bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text text-transparent">
             MoMo Shield
           </h1>
-          <p className="text-sm text-slate-500 mt-1">AI-Powered Mobile Money Fraud Detection</p>
+          <p className="text-sm text-slate-600 mt-1">AI-Powered Mobile Money Fraud Detection</p>
         </div>
         
         {/* Login Card */}
@@ -350,7 +355,7 @@ export default function Login() {
           <div className="bg-white border-2 border-slate-300 rounded-3xl overflow-hidden shadow-xl animate-in fade-in slide-in-from-bottom-4 duration-300">
             <div className="text-center pt-7 px-8">
               <h2 className="text-lg font-bold text-slate-900">Sign In</h2>
-              <p className="text-xs text-slate-500 mt-1">Sign in to your MoMo Shield account</p>
+              <p className="text-xs text-slate-600 mt-1">Sign in to your MoMo Shield account</p>
             </div>
             <hr className="border-slate-300" />
             <div className="p-7">
@@ -383,7 +388,7 @@ export default function Login() {
               >
                 {loginLoading ? 'Logging in…' : 'Login'}
               </button>
-              <div className="mt-4 text-center text-sm text-slate-500 flex flex-col gap-2">
+              <div className="mt-4 text-center text-sm text-slate-600 flex flex-col gap-2">
                 <button onClick={() => setView('forgot')} className="text-sky-500 hover:text-emerald-500 bg-transparent border-none cursor-pointer font-sans text-sm">
                   Forgot password?
                 </button>
@@ -403,7 +408,7 @@ export default function Login() {
           <div className="bg-white border-2 border-slate-300 rounded-3xl overflow-hidden shadow-xl animate-in fade-in slide-in-from-bottom-4 duration-300">
             <div className="text-center pt-7 px-8">
               <h2 className="text-lg font-bold text-slate-900">Create Account</h2>
-              <p className="text-xs text-slate-500 mt-1">Join MoMo Shield for secure transactions</p>
+              <p className="text-xs text-slate-600 mt-1">Join MoMo Shield for secure transactions</p>
             </div>
             <hr className="border-slate-300" />
             <div className="p-7 max-h-[80vh] overflow-y-auto">
@@ -450,7 +455,7 @@ export default function Login() {
                   <button onClick={() => regNext(0)} className="w-full py-3 bg-gradient-to-br from-emerald-500 to-sky-500 text-white rounded-[14px] font-bold text-sm tracking-wider hover:shadow-lg hover:-translate-y-0.5 transition-all">
                     Continue →
                   </button>
-                  <div className="text-center mt-6 text-sm text-slate-500">
+                  <div className="text-center mt-6 text-sm text-slate-600">
                     Already have an account? <button onClick={() => setView('login')} className="text-emerald-500 font-semibold bg-transparent border-none cursor-pointer font-sans text-sm">Login</button>
                   </div>
                 </div>
@@ -469,7 +474,7 @@ export default function Login() {
                       maxLength={16}
                       className="w-full px-3.5 py-3 bg-white border border-slate-300 rounded-[14px] text-slate-900 text-sm focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/12 outline-none"
                     />
-                    <div className="text-[11px] text-slate-500 mt-1.5">
+                    <div className="text-[11px] text-slate-600 mt-1.5 font-medium">
                       Format: 1 + 4-digit birth year + 800 (male) or 700 (female) + remaining digits = 16 total
                     </div>
                   </div>
@@ -532,7 +537,7 @@ export default function Login() {
                       </div>
                     )}
                     
-                    <video ref={faceVideoRef} autoPlay muted playsInline className={`w-full max-w-[260px] rounded-xl border-2 border-slate-300 mx-auto mb-3 ${stream && !faceCaptured ? 'block' : 'hidden'}`} />
+                    <video ref={faceVideoRef} autoPlay muted playsInline className={`w-full max-w-[260px] rounded-xl border-2 border-slate-300 mx-auto mb-3 ${stream && !faceCaptured ? 'block' : 'hidden'}`} style={{ transform: 'scaleX(-1)' }} />
                     <canvas ref={faceCanvasRef} className="hidden" />
                     {faceCaptured && faceBase64 && (
                       <img src={`data:image/jpeg;base64,${faceBase64}`} alt="Face capture" className="w-full max-w-[260px] rounded-xl border-2 border-emerald-500 mx-auto mb-3" />
@@ -546,7 +551,7 @@ export default function Login() {
                     )}
                     
                     {qualityWarn.show && (
-                      <div className="bg-amber-100/10 text-amber-600 border border-amber-500/30 rounded-[14px] p-2.5 text-xs mt-2.5 text-left">
+                      <div className="bg-amber-50 text-amber-800 border border-amber-300 rounded-[14px] p-2.5 text-xs mt-2.5 text-left font-medium">
                         <AlertTriangle className="w-3.5 h-3.5 inline mr-1" />
                         {qualityWarn.message}
                       </div>
@@ -600,7 +605,7 @@ export default function Login() {
           <div className="bg-white border-2 border-slate-300 rounded-3xl overflow-hidden shadow-xl animate-in fade-in slide-in-from-bottom-4 duration-300">
             <div className="text-center pt-7 px-8">
               <h2 className="text-lg font-bold text-slate-900">Reset Password</h2>
-              <p className="text-xs text-slate-500 mt-1">Enter your email to receive a reset link</p>
+              <p className="text-xs text-slate-600 mt-1">Enter your email to receive a reset link</p>
             </div>
             <hr className="border-slate-300" />
             <div className="p-7">

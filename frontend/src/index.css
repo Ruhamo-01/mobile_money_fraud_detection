@@ -3,35 +3,58 @@
 @tailwind utilities;
 
 :root {
-  --bg: #f8fafc;
+  --bg:      #f8fafc;
   --surface: #ffffff;
-  --card: #ffffff;
-  --border: #94a3b8;
-  --accent: #059669;
+  --border:  #e2e8f0;
+  --accent:  #059669;
   --accent2: #0284c7;
-  --danger: #dc2626;
-  --warn: #d97706;
-  --purple: #7c3aed;
-  --text: #0f172a;
-  --muted: #475569;
-  --radius: 14px;
+  --danger:  #dc2626;
+  --warn:    #d97706;
+  --text:    #0f172a;
+  --muted:   #475569;
 }
 
-* {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
+/* ── Base ── */
+*, *::before, *::after { box-sizing: border-box; }
 
-*::-webkit-scrollbar {
-  display: none;
-}
+html { scroll-behavior: smooth; }
 
 body {
-  font-family: 'Sora', sans-serif;
+  font-family: 'Sora', ui-sans-serif, system-ui, sans-serif;
   background: var(--bg);
   color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-.mono {
-  font-family: 'JetBrains Mono', monospace;
+/* ── Selection ── */
+::selection {
+  background: rgba(16, 185, 129, 0.2);
+  color: #065f46;
+}
+
+/* ── Scrollbar — hidden globally, visible on hover for overflow containers ── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+*::-webkit-scrollbar { width: 4px; height: 4px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+*::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* ── Mono utility ── */
+.mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+
+/* ── Focus ring ── */
+:focus-visible {
+  outline: 2px solid #10b981;
+  outline-offset: 2px;
+}
+
+/* ── Smooth transitions on interactive elements ── */
+button, a, input, select, textarea {
+  transition-property: color, background-color, border-color, box-shadow, transform, opacity;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }

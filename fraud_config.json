@@ -27,17 +27,16 @@
   "fraud_f1": 0.7223,
   "roc_auc": 0.9728,
   "fraud_logic": {
-    "rule1_amount_spike": "If amount > 5x user's typical daily range \u2192 require face verification",
-    "rule2_pin_failures": "If pin_fail_count >= 2 (on 3rd attempt) \u2192 require face verification",
-    "rule3_balance_abuse": "If amount > balance AND balance_abuse_count >= 3 \u2192 HARD BLOCK, no face needed",
-    "rule3_single_exceed": "If amount > balance (first/second time) \u2192 block immediately (impossible tx)",
+    "rule1_amount_spike": "amount > 5x user_typical_max \u2192 REQUIRE_FACE",
+    "rule2_pin_failures": "pin_fail_count >= 2 (3rd attempt) \u2192 REQUIRE_FACE",
+    "rule3_balance_abuse": "amount > balance \u2192 HARD_BLOCK (impossible tx); if 3rd time \u2192 permanent block",
     "face_verify_triggers": [
       "is_amount_spike=1",
       "pin_near_lockout=1"
     ],
     "hard_block_no_face": [
-      "hard_block_signal=1",
-      "amount > balance"
+      "amount > balance (any time)",
+      "hard_block_signal=1 (3rd time)"
     ]
   }
 }

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Shield, Lock, Check, AlertTriangle } from 'lucide-react';
 
-const API = 'http://localhost:5000';
+const API = '';
 
 export default function ResetPassword() {
   const navigate = useNavigate();
@@ -116,7 +116,7 @@ export default function ResetPassword() {
             ) : (
               <>
                 <div className="mb-5">
-                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">
                     New Password
                   </label>
                   <div className="relative">
@@ -132,7 +132,7 @@ export default function ResetPassword() {
                 </div>
 
                 <div className="mb-6">
-                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">
                     Confirm New Password
                   </label>
                   <div className="relative">
@@ -149,7 +149,7 @@ export default function ResetPassword() {
                 </div>
 
                 {/* Password rules hint */}
-                <div className="bg-slate-50 rounded-[12px] p-3 mb-5 text-xs text-slate-500 space-y-1">
+                <div className="bg-slate-50 border border-slate-200 rounded-[12px] p-3 mb-5 text-xs space-y-1.5">
                   {[
                     ['At least 8 characters',           newPassword.length >= 8],
                     ['Contains a letter',               /[a-zA-Z]/.test(newPassword)],
@@ -157,8 +157,8 @@ export default function ResetPassword() {
                     ['Contains a special character',    /[!@#$%^&*(),.?":{}|<>_\-]/.test(newPassword)],
                     ['Passwords match',                 newPassword && newPassword === confirmPass],
                   ].map(([label, ok]) => (
-                    <div key={label} className={`flex items-center gap-1.5 ${ok ? 'text-emerald-600' : 'text-slate-400'}`}>
-                      <Check className={`w-3 h-3 ${ok ? 'opacity-100' : 'opacity-30'}`} />
+                    <div key={label} className={`flex items-center gap-1.5 font-medium ${ok ? 'text-emerald-700' : 'text-slate-500'}`}>
+                      <Check className={`w-3 h-3 flex-shrink-0 ${ok ? 'opacity-100' : 'opacity-30'}`} />
                       {label}
                     </div>
                   ))}

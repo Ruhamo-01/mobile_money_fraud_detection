@@ -1,5 +1,6 @@
-import React, { useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, useNavigate } from 'react-router-dom';
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import HomePage from './components/HomePage';
 import Login from './components/Login';
 import AdminDashboard from './components/AdminDashboard';
 import ProviderDashboard from './components/ProviderDashboard';
@@ -10,7 +11,7 @@ function App() {
   return (
     <Router>
       <Routes>
-        <Route path="/" element={<Login />} />
+        <Route path="/" element={<HomePage />} />
         <Route path="/login" element={<Login />} />
         <Route path="/admin_dashboard" element={<AdminDashboard />} />
         <Route path="/provider_dashboard" element={<ProviderDashboard />} />

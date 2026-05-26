@@ -1,5 +1,5 @@
 """
-auth_system.py — Authentication System
+auth_system.py -- Authentication System
 =======================================
 Handles:
   - Account creation (with face encoding captured at registration)
@@ -35,7 +35,7 @@ class AuthenticationSystem:
         conn = self.get_connection()
         c = conn.cursor()
 
-        # Main users table FIRST — other tables FK-reference it
+        # Main users table FIRST -- other tables FK-reference it
         c.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id                  SERIAL PRIMARY KEY,
@@ -68,7 +68,7 @@ class AuthenticationSystem:
             )
         ''')
 
-        # 3. user_sessions LAST — FK references users
+        # 3. user_sessions LAST -- FK references users
         c.execute('''
             CREATE TABLE IF NOT EXISTS user_sessions (
                 id            SERIAL PRIMARY KEY,
@@ -80,12 +80,19 @@ class AuthenticationSystem:
             )
         ''')
 
-        # Safe migrations — add columns that may be missing in older DBs
+        # Safe migrations -- add columns that may be missing in older DBs
         for col_sql in [
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT DEFAULT ''",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS face_encoding BYTEA",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS face_image_path TEXT",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_status TEXT DEFAULT 'pending'",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user'",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_hash TEXT",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_salt TEXT DEFAULT ''",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_attempts INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_blocked BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_fail_count INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS insuf_count INTEGER DEFAULT 0",
         ]:
             try:
                 c.execute(col_sql)
@@ -103,7 +110,7 @@ class AuthenticationSystem:
     def validate_phone_number(self, phone: str) -> str | None:
         """
         Accept Rwanda numbers in any common format and normalise to +250XXXXXXXXX.
-        Valid prefixes: 078, 079 (MTN), 072, 073 (Tigo).
+        Valid prefixes: 078, 079 (MTN), 072, 073 (Airtel).
         Returns normalised phone or None if invalid.
         """
         phone = phone.strip().replace(" ", "")
@@ -236,9 +243,27 @@ class AuthenticationSystem:
                 with open(face_image_path, "wb") as f:
                     f.write(img_bytes)
 
-                # Extract real 128-dim face encoding
+                # Upscale small images so HOG model can detect faces reliably
                 img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-                encs = face_recognition.face_encodings(np.array(img))
+                w, h = img.size
+                if w < 320 or h < 240:
+                    scale = max(320 / w, 240 / h)
+                    img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+
+                img_array = np.array(img)
+
+                # Try with upsampling first
+                encs = face_recognition.face_encodings(
+                    img_array,
+                    face_recognition.face_locations(img_array, model="hog", number_of_times_to_upsample=2)
+                )
+                if not encs:
+                    # Fallback: 2x upscale
+                    img_up = img.resize((img.width * 2, img.height * 2), Image.LANCZOS)
+                    encs = face_recognition.face_encodings(
+                        np.array(img_up),
+                        face_recognition.face_locations(np.array(img_up), model="hog", number_of_times_to_upsample=1)
+                    )
                 if not encs:
                     return {"success": False, "error": "No face detected in your photo. Please retake in good lighting with your face clearly visible."}
 
@@ -246,7 +271,7 @@ class AuthenticationSystem:
                 print(f"[Auth] Face encoding extracted and saved: {face_image_path}")
 
             except ImportError:
-                # face_recognition not installed — fall back to raw bytes
+                # face_recognition not installed -- fall back to raw bytes
                 face_encoding = img_bytes
                 print(f"[Auth] face_recognition not available, saved raw image")
             except Exception as e:
@@ -303,7 +328,8 @@ class AuthenticationSystem:
 
         if email:
             c.execute('''
-                SELECT id, phone_number, password_hash, salt, full_name, is_active, email, role
+                SELECT id, phone_number, password_hash, salt, full_name, is_active, email,
+                       COALESCE(role, 'user') as role
                 FROM users WHERE email = %s
             ''', (email,))
         else:
@@ -312,7 +338,8 @@ class AuthenticationSystem:
                 conn.close()
                 return {"success": False, "error": "Invalid phone number."}
             c.execute('''
-                SELECT id, phone_number, password_hash, salt, full_name, is_active, email, role
+                SELECT id, phone_number, password_hash, salt, full_name, is_active, email,
+                       COALESCE(role, 'user') as role
                 FROM users WHERE phone_number = %s
             ''', (validated,))
 
@@ -324,7 +351,7 @@ class AuthenticationSystem:
 
         user_id, user_phone, pw_hash, salt, full_name, is_active, user_email, user_role = user
 
-        # NOTE: is_active=0 means SIM is blocked for travel — login still allowed.
+        # NOTE: is_active=0 means SIM is blocked for travel -- login still allowed.
         # Transfer blocking is enforced in money_transfer.py via travel_records.
 
         # Verify password
@@ -374,7 +401,8 @@ class AuthenticationSystem:
             c.execute('''
                 SELECT u.id, u.phone_number, u.full_name, u.account_balance,
                        u.email, u.national_id, u.gender, u.verification_status,
-                       u.face_encoding IS NOT NULL AS has_face
+                       u.face_encoding IS NOT NULL AS has_face,
+                       COALESCE(u.role, 'user') AS role
                 FROM user_sessions s
                 JOIN users u ON s.user_id = u.id
                 WHERE s.session_token = %s
@@ -390,15 +418,16 @@ class AuthenticationSystem:
             return None
 
         return {
-            "id"                : row[0],
-            "phone"             : row[1],
-            "name"              : row[2],
-            "balance"           : row[3],
-            "email"             : row[4],
-            "nationalId"        : row[5],
-            "gender"            : row[6] or "",
+            "id"                 : row[0],
+            "phone"              : row[1],
+            "name"               : row[2],
+            "balance"            : row[3],
+            "email"              : row[4],
+            "nationalId"         : row[5],
+            "gender"             : row[6] or "",
             "verification_status": row[7],
-            "has_face"          : bool(row[8]),
+            "has_face"           : bool(row[8]),
+            "role"               : row[9],
         }
 
     def logout(self, session_token: str) -> dict:
@@ -410,7 +439,7 @@ class AuthenticationSystem:
         return {"success": True, "message": "Logged out successfully."}
 
     def cleanup_expired_sessions(self):
-        """Remove expired sessions — call periodically from app startup."""
+        """Remove expired sessions -- call periodically from app startup."""
         conn = self.get_connection()
         c = conn.cursor()
         c.execute("DELETE FROM user_sessions WHERE expires_at <= CURRENT_TIMESTAMP")
@@ -424,7 +453,7 @@ class AuthenticationSystem:
     def request_password_reset(self, email: str) -> dict:
         """
         Generate a one-time reset token (valid 1 hour).
-        In production, email the link — here we return the token for
+        In production, email the link -- here we return the token for
         the frontend to handle.
         """
         if not self.validate_email(email):
@@ -457,13 +486,13 @@ class AuthenticationSystem:
 
             SMTP_HOST     = 'smtp.gmail.com'
             SMTP_PORT     = 587
-            SMTP_USERNAME = 'ericuwinezastarboy@gmail.com'
+            SMTP_USERNAME = 'ruhamorose@gmail.com'
             SMTP_PASSWORD = 'wagbvbyowxhbwrsg'
 
             reset_link = f"http://localhost:5173/reset-password?token={token}"
 
             msg = MIMEMultipart('alternative')
-            msg['Subject'] = ' MoMo Shield — Password Reset Request'
+            msg['Subject'] = ' MoMo Shield -- Password Reset Request'
             msg['From']    = f'MoMo Shield <{SMTP_USERNAME}>'
             msg['To']      = email
 
@@ -475,9 +504,9 @@ class AuthenticationSystem:
               <a href="{reset_link}" style="display:inline-block;margin:20px 0;padding:12px 28px;background:linear-gradient(to right,#10b981,#0ea5e9);color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">
                 Reset My Password
               </a>
-              <p style="color:#64748b;font-size:13px;">This link expires in <strong>1 hour</strong>. If you did not request this, ignore this email — your account is safe.</p>
+              <p style="color:#64748b;font-size:13px;">This link expires in <strong>1 hour</strong>. If you did not request this, ignore this email -- your account is safe.</p>
               <hr style="border:none;border-top:1px solid #e2e8f0;margin:20px 0;">
-              <p style="color:#94a3b8;font-size:11px;">MoMo Shield — AI-Powered Mobile Money Fraud Detection</p>
+              <p style="color:#94a3b8;font-size:11px;">MoMo Shield -- AI-Powered Mobile Money Fraud Detection</p>
             </div>
             """
 
@@ -493,7 +522,7 @@ class AuthenticationSystem:
 
         except Exception as e:
             print(f"[Auth] Email send failed: {e}")
-            # Still return success — token is valid even if email failed
+            # Still return success -- token is valid even if email failed
             return {
                 "success": True,
                 "message": "Reset token generated but email delivery failed. Contact support.",
@@ -623,24 +652,50 @@ class AuthenticationSystem:
             import base64
             from PIL import Image
             import io
-            img_bytes    = base64.b64decode(face_base64)
-            img          = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-            new_encs     = face_recognition.face_encodings(np.array(img))
+            img_bytes = base64.b64decode(face_base64)
+            img       = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+
+            # Upscale small images for better detection
+            w, h = img.size
+            if w < 320 or h < 240:
+                scale = max(320 / w, 240 / h)
+                img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+            img_array = np.array(img)
+
+            # Detect face with upsampling
+            live_locs = face_recognition.face_locations(img_array, model="hog", number_of_times_to_upsample=2)
+            if not live_locs:
+                # Fallback: 2x upscale
+                img_up = img.resize((img.width * 2, img.height * 2), Image.LANCZOS)
+                live_locs_up = face_recognition.face_locations(np.array(img_up), model="hog", number_of_times_to_upsample=1)
+                if live_locs_up:
+                    live_locs = [(t//2, r//2, b//2, l//2) for t, r, b, l in live_locs_up]
+                else:
+                    return {"success": False, "error": "No face detected. Try again in good lighting with your face clearly visible."}
+
+            new_encs = face_recognition.face_encodings(img_array, live_locs)
             if not new_encs:
-                return {"success": False, "error": "No face detected. Try again in good lighting."}
-            # Load stored encoding — could be 128-dim vector or legacy raw image
+                return {"success": False, "error": "Could not generate face encoding. Try again in better lighting."}
+
+            # Robustly decode stored encoding -- handles float64, float32, and legacy JPEG bytes
             stored_bytes = bytes(stored_face)
-            stored_enc = np.frombuffer(stored_bytes, dtype=np.float64)
-            if len(stored_enc) != 128:
-                # Legacy: stored as raw JPEG — re-extract encoding
+            if len(stored_bytes) == 1024:
+                stored_enc = np.frombuffer(stored_bytes, dtype=np.float64)
+            elif len(stored_bytes) == 512:
+                stored_enc = np.frombuffer(stored_bytes, dtype=np.float32).astype(np.float64)
+            else:
+                # Legacy: stored as raw JPEG -- re-extract encoding
                 try:
-                    stored_img = Image.open(io.BytesIO(stored_bytes)).convert("RGB")
+                    stored_img  = Image.open(io.BytesIO(stored_bytes)).convert("RGB")
                     stored_encs = face_recognition.face_encodings(np.array(stored_img))
                     if not stored_encs:
                         return {"success": False, "error": "Stored face unreadable. Contact support."}
                     stored_enc = stored_encs[0]
                 except Exception:
                     return {"success": False, "error": "Stored face unreadable. Contact support."}
+
+            if len(stored_enc) != 128:
+                return {"success": False, "error": "Stored face encoding is corrupted. Please update your face in settings."}
 
             distance = face_recognition.face_distance([stored_enc], new_encs[0])[0]
             match = face_recognition.compare_faces([stored_enc], new_encs[0], tolerance=0.5)
@@ -652,7 +707,7 @@ class AuthenticationSystem:
                         "The face you scanned does not match the face registered on this account. "
                         "This means either:\n"
                         "• You are not the account owner\n"
-                        "• Poor lighting or angle — try again in a brighter area\n"
+                        "• Poor lighting or angle -- try again in a brighter area\n"
                         "• Glasses, hat, or mask is covering your face\n\n"
                         "For security, this PIN reset attempt has been blocked and logged. "
                         "If this is your account, please contact support."

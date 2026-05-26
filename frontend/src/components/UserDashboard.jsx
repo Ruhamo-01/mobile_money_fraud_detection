@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Wallet, Send, History, Lock, User, Camera, Check, RefreshCw, LogOut, AlertTriangle, Shield, Activity } from 'lucide-react';
-import { fmtRWF, fmtDate, showAlert, setLoading } from '../utils/helpers';
+import { fmtRWF, fmtDate, showAlert } from '../utils/helpers';
 
-const API = 'http://localhost:5000';
+const API = '';
 const TOKEN = () => localStorage.getItem('session_token');
 
 const NavItem = ({ page, activePage, setActivePage, icon: Icon, label }) => (
@@ -41,10 +41,10 @@ const Button = ({ children, variant = 'primary', className = '', ...props }) => 
 
 const AlertMsg = ({ msg }) => (
   msg.show ? (
-    <div className={`p-2.5 rounded-lg text-xs mb-4 ${
-      msg.type === 'success' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' :
-      msg.type === 'error' ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20' :
-      'bg-sky-500/10 text-sky-500 border border-sky-500/20'
+    <div className={`p-3 rounded-lg text-sm mb-4 font-medium ${
+      msg.type === 'success' ? 'bg-emerald-50 text-emerald-800 border border-emerald-300' :
+      msg.type === 'error'   ? 'bg-rose-50 text-rose-800 border border-rose-300' :
+                               'bg-sky-50 text-sky-800 border border-sky-300'
     }`}>
       {msg.message}
     </div>
@@ -72,6 +72,16 @@ export default function UserDashboard() {
   const [showSetPinModal, setShowSetPinModal] = useState(false);
   const [newPinInput, setNewPinInput] = useState('');
   const [newPinMsg, setNewPinMsg] = useState({ show: false, message: '' });
+
+  // Face verification modal for high-risk transfers
+  const [showFaceModal, setShowFaceModal] = useState(false);
+  const [faceModalMsg, setFaceModalMsg] = useState({ show: false, message: '', type: 'error' });
+  const [transferFaceBase64, setTransferFaceBase64] = useState(null);
+  const [transferFaceCaptured, setTransferFaceCaptured] = useState(false);
+  const [transferFaceStream, setTransferFaceStream] = useState(null);
+  const [faceVerifying, setFaceVerifying] = useState(false);
+  const [pendingPinInput, setPendingPinInput] = useState('');
+  const [transferExplanation, setTransferExplanation] = useState(null); // XAI explanation
   
   // Reset PIN state
   const [resetStep, setResetStep] = useState(1);
@@ -103,6 +113,8 @@ export default function UserDashboard() {
   const resetFaceCanvasRef = useRef(null);
   const updateFaceVideoRef = useRef(null);
   const updateFaceCanvasRef = useRef(null);
+  const transferFaceVideoRef = useRef(null);
+  const transferFaceCanvasRef = useRef(null);
   
   useEffect(() => {
     const token = TOKEN();
@@ -123,8 +135,9 @@ export default function UserDashboard() {
     return () => {
       if (resetStream) resetStream.getTracks().forEach(t => t.stop());
       if (updateStream) updateStream.getTracks().forEach(t => t.stop());
+      if (transferFaceStream) transferFaceStream.getTracks().forEach(t => t.stop());
     };
-  }, [resetStream, updateStream]);
+  }, [resetStream, updateStream, transferFaceStream]);
   
   const init = async () => {
     try {
@@ -250,7 +263,7 @@ export default function UserDashboard() {
     
     try {
       // First verify PIN
-      const pinR = await fetch(`http://localhost:5000/api/verify-pin`, {
+      const pinR = await fetch(`/api/verify-pin`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -264,7 +277,7 @@ export default function UserDashboard() {
         return;
       }
 
-      const r = await fetch(`http://localhost:5000/api/transfer`, {
+      const r = await fetch(`/api/transfer`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -287,11 +300,115 @@ export default function UserDashboard() {
         setTransferAmount('');
         setFee(0);
         loadBalance();
+      } else if (d.face_required || d.action === 'REQUIRE_FACE') {
+        // ML flagged this transfer — face verification required
+        setPendingPinInput(pinInput);
+        setShowPinModal(false);
+        setPinInput('');
+        setPinModalMsg({ show: false, message: '' });
+        setTransferFaceBase64(null);
+        setTransferFaceCaptured(false);
+        setFaceModalMsg({ show: false, message: '', type: 'error' });
+        setTransferExplanation(d.explanation || null);  // store XAI explanation
+        setShowFaceModal(true);
       } else {
         setPinModalMsg({ show: true, message: d.error || 'Transfer failed' });
       }
     } catch (e) {
       setPinModalMsg({ show: true, message: 'Network error. Please try again.' });
+    }
+  };
+
+  // ── Transfer face verification functions ──────────────────────────────
+
+  const startTransferCamera = async () => {
+    await startCamera(transferFaceVideoRef, setTransferFaceStream,
+      (msg) => setFaceModalMsg({ show: true, message: msg, type: 'error' }));
+  };
+
+  const captureTransferFace = async () => {
+    setFaceModalMsg({ show: true, message: 'Validating face…', type: 'success' });
+    const { base64, error } = await captureFaceFromVideo(
+      transferFaceVideoRef, transferFaceCanvasRef, null);
+    if (error) {
+      setFaceModalMsg({ show: true, message: error, type: 'error' });
+      return;
+    }
+    setTransferFaceBase64(base64);
+    setTransferFaceCaptured(true);
+    setFaceModalMsg({ show: true, message: 'Face verified — tap Confirm Transfer to proceed.', type: 'success' });
+    stopCameraStream(transferFaceStream, setTransferFaceStream, transferFaceVideoRef);
+  };
+
+  const retakeTransferFace = () => {
+    setTransferFaceBase64(null);
+    setTransferFaceCaptured(false);
+    setFaceModalMsg({ show: false, message: '', type: 'error' });
+    startTransferCamera();
+  };
+
+  const submitFaceVerifiedTransfer = async () => {
+    if (!transferFaceBase64) return;
+    setFaceVerifying(true);
+    setFaceModalMsg({ show: false, message: '', type: 'error' });
+    try {
+      const r = await fetch(`/api/transfer`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + TOKEN()
+        },
+        body: JSON.stringify({
+          session_token  : TOKEN(),
+          recipient_phone: '+250' + recipientPhone,
+          amount         : parseFloat(transferAmount),
+          pin            : pendingPinInput,
+          face_base64    : transferFaceBase64,
+        })
+      });
+      const d = await r.json();
+      if (d.success) {
+        setShowFaceModal(false);
+        setTransferFaceBase64(null);
+        setTransferFaceCaptured(false);
+        setPendingPinInput('');
+        setRecipientPhone('');
+        setRecipientName('');
+        setTransferAmount('');
+        setFee(0);
+        showAlert(setTransferMsg, 'Transfer approved after face verification.', 'success');
+        loadBalance();
+      } else if (d.action === 'BLOCK') {
+        setFaceModalMsg({
+          show: true,
+          message: d.error || 'Transfer blocked by fraud detection.',
+          type: 'error'
+        });
+      } else {
+        setFaceModalMsg({
+          show: true,
+          message: d.error || 'Face verification failed. Please try again.',
+          type: 'error'
+        });
+        setTransferFaceBase64(null);
+        setTransferFaceCaptured(false);
+      }
+    } catch {
+      setFaceModalMsg({ show: true, message: 'Network error. Please try again.', type: 'error' });
+    } finally {
+      setFaceVerifying(false);
+    }
+  };
+
+  const closeFaceModal = () => {
+    setShowFaceModal(false);
+    setTransferFaceBase64(null);
+    setTransferFaceCaptured(false);
+    setTransferExplanation(null);
+    setPendingPinInput('');
+    if (transferFaceStream) {
+      transferFaceStream.getTracks().forEach(t => t.stop());
+      setTransferFaceStream(null);
     }
   };
   
@@ -318,76 +435,97 @@ export default function UserDashboard() {
 }
   };
   
-  const resetStartCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
-      });
-      setResetStream(stream);
-      if (resetFaceVideoRef.current) {
-        resetFaceVideoRef.current.srcObject = stream;
-        resetFaceVideoRef.current.style.display = 'block';
-        resetFaceVideoRef.current.style.transform = 'scaleX(-1)';
-      }
-    } catch (e) {
-      showAlert(setTransferMsg, 'Camera access denied', 'error');
-    }
-  };
-  
-  const resetCaptureFace = () => {
-    const video = resetFaceVideoRef.current;
-    const canvas = resetFaceCanvasRef.current;
-    if (!video || !canvas) return;
-    
-    canvas.width = video.videoWidth || 1280;
+  // ── Shared face capture utility ──────────────────────────────────────
+  // Used by reset PIN, update face, and transfer face verification.
+  // Returns { base64, error } — validates against /api/validate-face before returning.
+  const captureFaceFromVideo = async (videoRef, canvasRef, setMsg) => {
+    const video  = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return { base64: null, error: 'Camera not ready' };
+
+    // Draw at native resolution — do NOT mirror (face_recognition needs correct orientation)
+    // The video element is mirrored via CSS for natural selfie UX
+    canvas.width  = video.videoWidth  || 1280;
     canvas.height = video.videoHeight || 720;
     const ctx = canvas.getContext('2d');
-    ctx.translate(canvas.width, 0);
-    ctx.scale(-1, 1);
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-    // ── Quality check: reject dark/black or overexposed frames ──────────
-    const sample = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const pixels = sample.data;
-    let totalBrightness = 0;
-    for (let i = 0; i < pixels.length; i += 4) {
-      totalBrightness += (pixels[i] * 0.299 + pixels[i+1] * 0.587 + pixels[i+2] * 0.114);
+    // Brightness check
+    const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    let brightness = 0;
+    for (let i = 0; i < pixels.length; i += 4)
+      brightness += 0.299 * pixels[i] + 0.587 * pixels[i+1] + 0.114 * pixels[i+2];
+    const avg = brightness / (pixels.length / 4);
+    if (avg < 35) return { base64: null, error: 'Image too dark — move to a brighter area.' };
+    if (avg > 235) return { base64: null, error: 'Image too bright — reduce direct lighting.' };
+
+    // Scale to 800px wide for reliable face detection
+    const scaled = document.createElement('canvas');
+    scaled.width  = 800;
+    scaled.height = Math.round(canvas.height * 800 / canvas.width);
+    scaled.getContext('2d').drawImage(canvas, 0, 0, scaled.width, scaled.height);
+    const base64 = scaled.toDataURL('image/jpeg', 0.92).split(',')[1];
+
+    // Validate with backend
+    try {
+      const r = await fetch(`${API}/api/validate-face`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ face_base64: base64 })
+      });
+      const d = await r.json();
+      if (r.ok && (d.success || d.face_detected) && d.face_count > 0) {
+        return { base64, error: null };
+      }
+      return { base64: null, error: d.error || 'No face detected. Ensure your face is centred and well-lit.' };
+    } catch {
+      return { base64: null, error: 'Could not reach server. Check your connection.' };
     }
-    const avgBrightness = totalBrightness / (pixels.length / 4);
-    if (avgBrightness < 40) {
-      showAlert(setTransferMsg,
-        '⚠️ Image is too dark. Move to a brighter area and try again.', 'error');
+  };
+
+  // ── Shared camera start utility ───────────────────────────────────────
+  const startCamera = async (videoRef, setStream, setErrMsg) => {
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
+      });
+      setStream(s);
+      if (videoRef.current) {
+        videoRef.current.srcObject = s;
+        videoRef.current.style.display = 'block';
+        // Mirror video for natural selfie UX — canvas capture does NOT mirror
+        videoRef.current.style.transform = 'scaleX(-1)';
+      }
+    } catch {
+      setErrMsg('Camera access denied. Please allow camera access and try again.');
+    }
+  };
+
+  const stopCameraStream = (stream, setStream, videoRef) => {
+    if (stream) { stream.getTracks().forEach(t => t.stop()); setStream(null); }
+    if (videoRef?.current) { videoRef.current.srcObject = null; videoRef.current.style.display = 'none'; }
+  };
+  
+  const resetStartCamera = async () => {
+    await startCamera(resetFaceVideoRef, setResetStream,
+      (msg) => showAlert(setTransferMsg, msg, 'error'));
+  };
+
+  const resetCaptureFace = async () => {
+    showAlert(setTransferMsg, 'Validating face…', 'success');
+    const { base64, error } = await captureFaceFromVideo(
+      resetFaceVideoRef, resetFaceCanvasRef, setTransferMsg);
+    if (error) {
+      showAlert(setTransferMsg, error, 'error');
       return;
     }
-    if (avgBrightness > 230) {
-      showAlert(setTransferMsg,
-        ' Image is too bright / overexposed. Avoid direct light behind you.', 'error');
-      return;
-    }
-
-    const base64 = canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
-
-    // Check if half the image is black (camera not covering full frame)
-    const leftSample = ctx.getImageData(0, 0, canvas.width / 2, canvas.height);
-    const rightSample = ctx.getImageData(canvas.width / 2, 0, canvas.width / 2, canvas.height);
-    const avgLeft = Array.from(leftSample.data).filter((_, i) => i % 4 !== 3).reduce((a, b) => a + b, 0) / (leftSample.data.length * 3 / 4);
-    const avgRight = Array.from(rightSample.data).filter((_, i) => i % 4 !== 3).reduce((a, b) => a + b, 0) / (rightSample.data.length * 3 / 4);
-    if (Math.abs(avgLeft - avgRight) > 80) {
-      showAlert(setTransferMsg, ' Camera not properly positioned. Center your face and try again.', 'error');
-      return;
-    }
-
     setResetFaceBase64(base64);
     setResetFaceCaptured(true);
     setResetFaceValid(true);
-    if (resetFaceVideoRef.current) resetFaceVideoRef.current.style.display = 'none';
-    if (resetStream) {
-      resetStream.getTracks().forEach(t => t.stop());
-      setResetStream(null);
-    }
+    stopCameraStream(resetStream, setResetStream, resetFaceVideoRef);
+    showAlert(setTransferMsg, 'Face verified successfully.', 'success');
   };
-  
+
   const resetRetake = () => {
     setResetFaceBase64(null);
     setResetFaceCaptured(false);
@@ -453,75 +591,25 @@ export default function UserDashboard() {
   };
   
   const ufStartCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
-      });
-      setUpdateStream(stream);
-      if (updateFaceVideoRef.current) {
-        updateFaceVideoRef.current.srcObject = stream;
-        updateFaceVideoRef.current.style.display = 'block';
-        updateFaceVideoRef.current.style.transform = 'scaleX(-1)';
-      }
-    } catch (e) {
-      showAlert(setTransferMsg, 'Camera access denied', 'error');
-    }
+    await startCamera(updateFaceVideoRef, setUpdateStream,
+      (msg) => showAlert(setTransferMsg, msg, 'error'));
   };
-  
-  const ufCapture = () => {
-    const video = updateFaceVideoRef.current;
-    const canvas = updateFaceCanvasRef.current;
-    if (!video || !canvas) return;
 
-    canvas.width = video.videoWidth || 1280;
-    canvas.height = video.videoHeight || 720;
-    const ctx = canvas.getContext('2d');
-    ctx.translate(canvas.width, 0);
-    ctx.scale(-1, 1);
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-
-    // ── Quality check: reject dark/black frames ──────────────────────
-    const sample = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const pixels = sample.data;
-    let totalBrightness = 0;
-    for (let i = 0; i < pixels.length; i += 4) {
-      totalBrightness += (pixels[i] * 0.299 + pixels[i+1] * 0.587 + pixels[i+2] * 0.114);
-    }
-    const avgBrightness = totalBrightness / (pixels.length / 4);
-    if (avgBrightness < 40) {
-      showAlert(setTransferMsg,
-        '⚠️ Image is too dark. Move to a brighter area and try again.', 'error');
+  const ufCapture = async () => {
+    showAlert(setTransferMsg, 'Validating face…', 'success');
+    const { base64, error } = await captureFaceFromVideo(
+      updateFaceVideoRef, updateFaceCanvasRef, setTransferMsg);
+    if (error) {
+      showAlert(setTransferMsg, error, 'error');
       return;
     }
-    if (avgBrightness > 230) {
-      showAlert(setTransferMsg,
-        ' Image is too bright / overexposed. Avoid direct light behind you.', 'error');
-      return;
-    }
-
-    const base64 = canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
-
-    // Check if half the image is black (camera not covering full frame)
-    const leftSample = ctx.getImageData(0, 0, canvas.width / 2, canvas.height);
-    const rightSample = ctx.getImageData(canvas.width / 2, 0, canvas.width / 2, canvas.height);
-    const avgLeft = Array.from(leftSample.data).filter((_, i) => i % 4 !== 3).reduce((a, b) => a + b, 0) / (leftSample.data.length * 3 / 4);
-    const avgRight = Array.from(rightSample.data).filter((_, i) => i % 4 !== 3).reduce((a, b) => a + b, 0) / (rightSample.data.length * 3 / 4);
-    if (Math.abs(avgLeft - avgRight) > 80) {
-      showAlert(setTransferMsg, ' Camera not properly positioned. Center your face and try again.', 'error');
-      return;
-    }
-
     setUpdateFaceBase64(base64);
     setUpdateFaceCaptured(true);
     setUpdateFaceValid(true);
-    if (updateFaceVideoRef.current) updateFaceVideoRef.current.style.display = 'none';
-    if (updateStream) {
-      updateStream.getTracks().forEach(t => t.stop());
-      setUpdateStream(null);
-    }
+    stopCameraStream(updateStream, setUpdateStream, updateFaceVideoRef);
+    showAlert(setTransferMsg, 'Face verified successfully.', 'success');
   };
-  
+
   const ufRetake = () => {
     setUpdateFaceBase64(null);
     setUpdateFaceCaptured(false);
@@ -578,7 +666,7 @@ export default function UserDashboard() {
       return;
     }
     try {
-      const r = await fetch(`http://localhost:5000/api/set-pin`, {
+      const r = await fetch(`/api/set-pin`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -612,10 +700,10 @@ export default function UserDashboard() {
           <div className="text-sm font-bold leading-tight text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
             MoMo Shield
           </div>
-          <div className="text-[10px] text-slate-400 leading-tight mb-2">User Dashboard</div>
+          <div className="text-[10px] text-slate-500 font-semibold leading-tight mb-2">Customer Dashboard</div>
           {currentUser && (
             <>
-              <div className="text-xs font-semibold leading-tight text-slate-800">{currentUser.name}</div>
+              <div className="text-xs font-bold leading-tight text-slate-800">{currentUser.name}</div>
               <div className="text-[10px] text-slate-500 font-mono leading-tight">{currentUser.phone}</div>
             </>
           )}
@@ -643,10 +731,10 @@ export default function UserDashboard() {
         {activePage === 'balance' && (
           <div>
             <div className="mb-6 text-center">
-              <h1 className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
+              <h1 className="text-2xl font-bold text-slate-900">
                 My Balance
               </h1>
-              <p className="mt-1 text-sm text-slate-500">Account overview and quick actions</p>
+              <p className="mt-1 text-sm text-slate-600">Account overview and quick actions</p>
             </div>
             
             <div className="grid grid-cols-2 gap-5">
@@ -655,11 +743,11 @@ export default function UserDashboard() {
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-sky-500 flex items-center justify-center mb-2.5">
                     <Wallet className="w-5 h-5 text-white" />
                   </div>
-                  <h2 className="text-base font-semibold">Account Balance</h2>
+                  <h2 className="text-base font-bold text-slate-800">Account Balance</h2>
                 </div>
                 <div className="text-center p-9">
-                  <div className="text-[2.4rem] font-bold font-mono text-emerald-500">{fmtRWF(balance)}</div>
-                  <div className="text-xs text-slate-500 mt-1.5">Rwanda Francs</div>
+                  <div className="text-[2.4rem] font-bold font-mono text-emerald-600">{fmtRWF(balance)}</div>
+                  <div className="text-xs font-semibold text-slate-600 mt-1.5">Rwanda Francs</div>
                   <div className="mt-6">
                     <Button onClick={() => setActivePage('transfer')} className="px-5 text-xs">Send Money</Button>
                   </div>
@@ -671,20 +759,20 @@ export default function UserDashboard() {
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500 to-sky-500 flex items-center justify-center mb-2.5">
                     <History className="w-5 h-5 text-white" />
                   </div>
-                  <h2 className="text-base font-semibold">Recent Activity</h2>
+                  <h2 className="text-base font-bold text-slate-800">Recent Activity</h2>
                 </div>
                 <div className="p-0">
                   {transactions.length === 0 ? (
                     <div className="p-10 text-sm text-center text-slate-500">No recent transactions</div>
                   ) : (
                     transactions.slice(0, 5).map((tx) => (
-                      <div key={tx.id} className="flex items-center justify-between p-4 text-xs border-b border-slate-300">
+                      <div key={tx.id} className="flex items-center justify-between p-4 text-xs border-b border-slate-200">
                         <div>
-                          <div className="font-semibold">{tx.direction === 'sent' ? '→ ' + (tx.recipient_phone || tx.recipient || '—') : '← ' + (tx.sender_phone || tx.sender || '—')}</div>
-                          <div className="text-slate-500">{fmtDate(tx.created_at)}</div>
+                          <div className="font-semibold text-slate-800">{tx.direction === 'sent' ? '→ ' + (tx.recipient_phone || tx.recipient || '—') : '← ' + (tx.sender_phone || tx.sender || '—')}</div>
+                          <div className="text-slate-500 mt-0.5">{fmtDate(tx.created_at)}</div>
                         </div>
                         <div className="text-right">
-                          <div className={`font-semibold ${tx.direction === 'sent' ? 'text-red-500' : 'text-emerald-500'}`}>
+                          <div className={`font-bold ${tx.direction === 'sent' ? 'text-rose-600' : 'text-emerald-600'}`}>
                             {tx.direction === 'sent' ? '-' : '+'}{fmtRWF(Math.abs(tx.amount))}
                           </div>
                         </div>
@@ -701,10 +789,10 @@ export default function UserDashboard() {
         {activePage === 'transfer' && (
           <div>
             <div className="mb-6 text-center">
-              <h1 className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
+              <h1 className="text-2xl font-bold text-slate-900">
                 Send Money
               </h1>
-              <p className="mt-1 text-sm text-slate-500">Secure transfer with real-time fraud protection</p>
+              <p className="mt-1 text-sm text-slate-600">Secure transfer with real-time fraud protection</p>
             </div>
             
             <div className="max-w-[480px] mx-auto">
@@ -713,7 +801,7 @@ export default function UserDashboard() {
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-sky-500 flex items-center justify-center mb-2.5">
                     <Send className="w-5 h-5 text-white" />
                   </div>
-                  <h2 className="text-base font-semibold">New Transfer</h2>
+                  <h2 className="text-base font-bold text-slate-800">New Transfer</h2>
                 </div>
                 <div className="p-6">
                   <AlertMsg msg={transferMsg} />
@@ -737,7 +825,7 @@ export default function UserDashboard() {
                       />
                     </div>
                     {recipientName && (
-                      <div className="mt-1.5 px-3 py-2 rounded-lg text-xs bg-emerald-500/8 border border-emerald-500/20 text-emerald-500 font-semibold">
+                      <div className="mt-1.5 px-3 py-2 rounded-lg text-xs bg-emerald-50 border border-emerald-300 text-emerald-800 font-semibold">
                         {recipientName}
                       </div>
                     )}
@@ -759,18 +847,18 @@ export default function UserDashboard() {
                   </div>
                   
                   {transferAmount && (
-                    <div className="p-4 mb-5 text-xs border rounded-lg bg-slate-50 border-slate-300">
-                      <div className="flex justify-between py-1">
-                        <span>Amount</span>
-                        <span>{fmtRWF(parseFloat(transferAmount) || 0)}</span>
+                    <div className="p-4 mb-5 text-xs border rounded-xl bg-slate-50 border-slate-200">
+                      <div className="flex justify-between py-1.5 border-b border-slate-200">
+                        <span className="font-medium text-slate-600">Amount</span>
+                        <span className="font-semibold text-slate-900">{fmtRWF(parseFloat(transferAmount) || 0)}</span>
                       </div>
-                      <div className="flex justify-between py-1">
-                        <span>Fee</span>
-                        <span>{fmtRWF(fee)}</span>
+                      <div className="flex justify-between py-1.5 border-b border-slate-200">
+                        <span className="font-medium text-slate-600">Fee</span>
+                        <span className="font-semibold text-slate-900">{fmtRWF(fee)}</span>
                       </div>
-                      <div className="flex justify-between py-1 pt-1 mt-1 font-bold border-t border-slate-300">
-                        <span>Total deducted</span>
-                        <span>{fmtRWF((parseFloat(transferAmount) || 0) + fee)}</span>
+                      <div className="flex justify-between py-1.5 pt-2 mt-1 font-bold border-t border-slate-300">
+                        <span className="text-slate-700">Total deducted</span>
+                        <span className="text-emerald-700">{fmtRWF((parseFloat(transferAmount) || 0) + fee)}</span>
                       </div>
                     </div>
                   )}
@@ -789,36 +877,38 @@ export default function UserDashboard() {
         {activePage === 'history' && (
           <div>
             <div className="mb-6 text-center">
-              <h1 className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
+              <h1 className="text-2xl font-bold text-slate-900">
                 Transaction History
               </h1>
-              <p className="mt-1 text-sm text-slate-500">Your recent money transfers</p>
+              <p className="mt-1 text-sm text-slate-600">Your recent money transfers</p>
             </div>
             <Card>
               <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
                 <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500 to-sky-500 flex items-center justify-center mb-2.5">
                   <History className="w-5 h-5 text-white" />
                 </div>
-                <h2 className="text-base font-semibold">Recent Transfers</h2>
+                <h2 className="text-base font-bold text-slate-800">Recent Transfers</h2>
               </div>
               <div className="p-0">
                 {history.length === 0 ? (
                   <div className="p-10 text-sm text-center text-slate-500">No transactions yet</div>
                 ) : (
                   history.map((tx) => (
-                    <div key={tx.id} className="flex items-center justify-between p-4 text-xs border-b border-slate-300">
+                    <div key={tx.id} className="flex items-center justify-between p-4 text-xs border-b border-slate-200 hover:bg-slate-50 transition-colors">
                       <div>
-                        <div className="font-semibold">{tx.direction === 'sent' ? '→ ' + (tx.recipient || tx.recipient_phone || '—') : '← ' + (tx.sender_phone || '—')}</div>
-                        <div className="text-slate-500">{fmtDate(tx.created_at)}</div>
-                        <div className={`text-[11px] ${tx.status === 'completed' ? 'text-emerald-500' : tx.status === 'blocked' ? 'text-red-500' : 'text-amber-500'}`}>
-                          {(tx.status || 'completed').toUpperCase()}
-                        </div>
+                        <div className="font-semibold text-slate-800">{tx.direction === 'sent' ? '→ ' + (tx.recipient || tx.recipient_phone || '—') : '← ' + (tx.sender_phone || '—')}</div>
+                        <div className="text-slate-500 mt-0.5">{fmtDate(tx.created_at)}</div>
+                        <span className={`inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
+                          tx.status === 'completed' ? 'bg-emerald-100 text-emerald-700 border-emerald-300' :
+                          tx.status === 'blocked'   ? 'bg-rose-100 text-rose-700 border-rose-300' :
+                                                      'bg-amber-100 text-amber-700 border-amber-300'
+                        }`}>{(tx.status || 'completed').toUpperCase()}</span>
                       </div>
                       <div className="text-right">
-                        <div className={`font-semibold ${tx.direction === 'sent' ? 'text-red-500' : 'text-emerald-500'}`}>
+                        <div className={`font-bold ${tx.direction === 'sent' ? 'text-rose-600' : 'text-emerald-600'}`}>
                           {tx.direction === 'sent' ? '-' : '+'}{fmtRWF(Math.abs(tx.amount))}
                         </div>
-                        <div className="text-slate-500">Fee: {fmtRWF(tx.fee || 0)}</div>
+                        <div className="text-slate-500 mt-0.5">Fee: {fmtRWF(tx.fee || 0)}</div>
                       </div>
                     </div>
                   ))
@@ -832,10 +922,10 @@ export default function UserDashboard() {
         {activePage === 'profile' && (
           <div>
             <div className="mb-6 text-center">
-              <h1 className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
+              <h1 className="text-2xl font-bold text-slate-900">
                 My Profile
               </h1>
-              <p className="mt-1 text-sm text-slate-500">Account information and settings</p>
+              <p className="mt-1 text-sm text-slate-600">Account information and settings</p>
             </div>
             
             <div className="max-w-[600px] mx-auto">
@@ -844,28 +934,28 @@ export default function UserDashboard() {
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-sky-500 flex items-center justify-center mb-2.5">
                     <User className="w-5 h-5 text-white" />
                   </div>
-                  <h2 className="text-base font-semibold">Account Details</h2>
+                  <h2 className="text-base font-bold text-slate-800">Account Details</h2>
                 </div>
                 <div className="p-6">
                   <div className="flex justify-between py-3 text-xs border-b border-slate-200">
-                    <span className="text-slate-500">Full Name</span>
-                    <span className="font-mono font-semibold">{profile?.name || '—'}</span>
+                    <span className="font-medium text-slate-600">Full Name</span>
+                    <span className="font-semibold text-slate-900">{profile?.name || currentUser?.name || '—'}</span>
                   </div>
                   <div className="flex justify-between py-3 text-xs border-b border-slate-200">
-                    <span className="text-slate-500">Phone Number</span>
-                    <span className="font-mono font-semibold">{profile?.phone || '—'}</span>
+                    <span className="font-medium text-slate-600">Phone Number</span>
+                    <span className="font-mono font-semibold text-slate-900">{profile?.phone || currentUser?.phone || '—'}</span>
                   </div>
                   <div className="flex justify-between py-3 text-xs border-b border-slate-200">
-                    <span className="text-slate-500">Email</span>
-                    <span className="font-mono font-semibold">{profile?.email || '—'}</span>
+                    <span className="font-medium text-slate-600">Email</span>
+                    <span className="font-semibold text-slate-900">{profile?.email || currentUser?.email || '—'}</span>
                   </div>
                   <div className="flex justify-between py-3 text-xs border-b border-slate-200">
-                    <span className="text-slate-500">National ID</span>
-                    <span className="font-mono font-semibold">{profile?.national_id || '—'}</span>
+                    <span className="font-medium text-slate-600">National ID</span>
+                    <span className="font-mono font-semibold text-slate-900">{profile?.national_id || currentUser?.nationalId || '—'}</span>
                   </div>
                   <div className="flex justify-between py-3 text-xs">
-                    <span className="text-slate-500">Account Status</span>
-                    <span className="font-mono font-semibold">Active</span>
+                    <span className="font-medium text-slate-600">Account Status</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-700 border border-emerald-300">Active</span>
                   </div>
                 </div>
               </Card>
@@ -877,10 +967,10 @@ export default function UserDashboard() {
         {activePage === 'reset-pin' && (
           <div>
             <div className="mb-6 text-center">
-              <h1 className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
+              <h1 className="text-2xl font-bold text-slate-900">
                 Reset PIN
               </h1>
-              <p className="mt-1 text-sm text-slate-500">Verify your identity to reset your transaction PIN</p>
+              <p className="mt-1 text-sm text-slate-600">Verify your identity to reset your transaction PIN</p>
             </div>
             
             <div className="max-w-[480px] mx-auto">
@@ -889,7 +979,7 @@ export default function UserDashboard() {
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-500 to-red-500 flex items-center justify-center mb-2.5">
                     <Lock className="w-5 h-5 text-white" />
                   </div>
-                  <h2 className="text-base font-semibold">PIN Reset</h2>
+                  <h2 className="text-base font-bold text-slate-800">PIN Reset</h2>
                   <p className="text-xs text-slate-500 mt-0.5">3 steps: identity → new PIN → face scan</p>
                 </div>
                 <div className="p-6">
@@ -897,7 +987,7 @@ export default function UserDashboard() {
                   
                   {resetStep === 1 && (
                     <div>
-                      <p className="text-xs text-slate-500 mb-3.5 text-center"><strong>Step 1 of 3</strong> — Verify your identity</p>
+                      <p className="text-xs text-slate-600 font-medium mb-3.5 text-center"><strong>Step 1 of 3</strong> — Verify your identity</p>
                       <div className="mb-5">
                         <label className="block text-xs font-semibold text-slate-900 mb-1.5">Phone Number</label>
                         <input
@@ -928,7 +1018,7 @@ export default function UserDashboard() {
                   
                   {resetStep === 2 && (
                     <div>
-                      <p className="text-xs text-slate-500 mb-3.5 text-center">
+                      <p className="text-xs text-slate-600 font-medium mb-3.5 text-center">
                         <strong>Step 2 of 3</strong> — Set your new PIN
                         {resetVerifiedName && <span className="block mt-1 font-semibold text-emerald-500">{resetVerifiedName}</span>}
                       </p>
@@ -962,9 +1052,11 @@ export default function UserDashboard() {
                   
                   {resetStep === 3 && (
                     <div>
-                      <p className="text-xs text-slate-500 mb-3.5 text-center"><strong>Step 3 of 3</strong> — Scan your face to confirm</p>
+                      <p className="text-xs text-slate-600 font-medium mb-3.5 text-center"><strong>Step 3 of 3</strong> — Scan your face to confirm</p>
                       <div className="rounded-xl overflow-hidden bg-black mb-2.5 min-h-[140px] flex items-center justify-center relative">
-                        <video ref={resetFaceVideoRef} autoPlay playsInline className="w-full max-h-[200px] hidden transform -scale-x-100" />
+                        <video ref={resetFaceVideoRef} autoPlay playsInline
+                          className="w-full max-h-[200px] hidden"
+                          style={{ transform: 'scaleX(-1)' }} />
                         <canvas ref={resetFaceCanvasRef} className="absolute invisible hidden w-0 h-0" />
                         {resetFaceCaptured && resetFaceBase64 && (
                           <img src={`data:image/jpeg;base64,${resetFaceBase64}`} alt="Face capture" className="w-full max-h-[200px] object-cover" />
@@ -986,7 +1078,7 @@ export default function UserDashboard() {
                         {resetStream && !resetFaceCaptured && (
                           <Button onClick={resetCaptureFace} className="justify-center flex-1">
                             <Check className="w-4 h-4" />
-                            Capture Face
+                            Capture &amp; Verify
                           </Button>
                         )}
                         {resetFaceCaptured && (
@@ -1012,10 +1104,10 @@ export default function UserDashboard() {
         {activePage === 'update-face' && (
           <div>
             <div className="mb-6 text-center">
-              <h1 className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text">
+              <h1 className="text-2xl font-bold text-slate-900">
                 Update Face
               </h1>
-              <p className="mt-1 text-sm text-slate-500">Verify your identity then register a new face scan</p>
+              <p className="mt-1 text-sm text-slate-600">Verify your identity then register a new face scan</p>
             </div>
             
             <div className="max-w-[480px] mx-auto">
@@ -1024,7 +1116,7 @@ export default function UserDashboard() {
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-sky-500 flex items-center justify-center mb-2.5">
                     <User className="w-5 h-5 text-white" />
                   </div>
-                  <h2 className="text-base font-semibold">Update Face</h2>
+                  <h2 className="text-base font-bold text-slate-800">Update Face</h2>
                   <p className="text-xs text-slate-500 mt-0.5">2 steps: identity → face scan</p>
                 </div>
                 <div className="p-6">
@@ -1032,7 +1124,7 @@ export default function UserDashboard() {
                   
                   {updateStep === 1 && (
                     <div>
-                      <p className="text-xs text-slate-500 mb-3.5 text-center"><strong>Step 1 of 2</strong> — Verify your identity</p>
+                      <p className="text-xs text-slate-600 font-medium mb-3.5 text-center"><strong>Step 1 of 2</strong> — Verify your identity</p>
                       <div className="mb-5">
                         <label className="block text-xs font-semibold text-slate-900 mb-1.5">Phone Number</label>
                         <input
@@ -1063,13 +1155,15 @@ export default function UserDashboard() {
                   
                   {updateStep === 2 && (
                     <div>
-                      <p className="text-xs text-slate-500 mb-3.5 text-center">
+                      <p className="text-xs text-slate-600 font-medium mb-3.5 text-center">
                         <strong>Step 2 of 2</strong> — Scan your face
                         {updateVerifiedName && <span className="block mt-1 font-semibold text-emerald-500">{updateVerifiedName}</span>}
                       </p>
-                      <p className="text-xs text-slate-500 mb-2.5">Your new face must match the face already on this account. Eyes, nose, mouth and chin must be clearly visible.</p>
+                      <p className="text-xs text-slate-600 mb-2.5">Your new face must match the face already on this account. Eyes, nose, mouth and chin must be clearly visible.</p>
                       <div className="rounded-xl overflow-hidden bg-black mb-2.5 min-h-[140px] flex items-center justify-center relative">
-                        <video ref={updateFaceVideoRef} autoPlay playsInline className="w-full max-h-[200px] hidden transform -scale-x-100" />
+                        <video ref={updateFaceVideoRef} autoPlay playsInline
+                          className="w-full max-h-[200px] hidden"
+                          style={{ transform: 'scaleX(-1)' }} />
                         <canvas ref={updateFaceCanvasRef} className="absolute invisible hidden w-0 h-0" />
                         {updateFaceCaptured && updateFaceBase64 && (
                           <img src={`data:image/jpeg;base64,${updateFaceBase64}`} alt="Face capture" className="w-full max-h-[200px] object-cover" />
@@ -1091,7 +1185,7 @@ export default function UserDashboard() {
                         {updateStream && !updateFaceCaptured && (
                           <Button onClick={ufCapture} className="justify-center w-full">
                             <Check className="w-4 h-4" />
-                            Capture Face
+                            Capture &amp; Verify
                           </Button>
                         )}
                         {updateFaceCaptured && (
@@ -1133,7 +1227,7 @@ export default function UserDashboard() {
             <h3 className="mb-1 text-base font-bold">Set Your PIN</h3>
             <p className="mb-4 text-xs text-slate-500">Create a 4–6 digit PIN to authorize transfers</p>
             {newPinMsg.show && (
-              <div className="p-2 mb-3 text-xs border rounded-lg bg-rose-500/10 text-rose-500 border-rose-500/20">
+              <div className="p-2 mb-3 text-xs border rounded-lg bg-rose-50 text-rose-800 border-rose-300">
                 {newPinMsg.message}
               </div>
             )}
@@ -1168,7 +1262,7 @@ export default function UserDashboard() {
             <h3 className="mb-1 text-base font-bold">Enter PIN</h3>
             <p className="mb-4 text-xs text-slate-500">Your 4–6 digit transaction PIN</p>
             {pinModalMsg.show && (
-              <div className="p-2 mb-3 text-xs border rounded-lg bg-rose-500/10 text-rose-500 border-rose-500/20">
+              <div className="p-2 mb-3 text-xs border rounded-lg bg-rose-50 text-rose-800 border-rose-300">
                 {pinModalMsg.message}
               </div>
             )}
@@ -1187,6 +1281,153 @@ export default function UserDashboard() {
               <Button onClick={confirmTransfer} className="justify-center flex-1">
                 Confirm
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Face Verification Modal (triggered when ML flags a transfer) ── */}
+      {showFaceModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-[360px] shadow-2xl overflow-hidden">
+
+            {/* Header — security alert */}
+            <div className="bg-amber-50 border-b border-amber-200 px-6 py-4 flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-bold text-amber-800">Identity Verification Required</p>
+                <p className="text-xs text-amber-700 mt-0.5">
+                  This transfer was flagged as high-risk. Scan your face to confirm it's you.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-6">
+              {/* Transfer summary */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-4 text-xs">
+                <div className="flex justify-between mb-1">
+                  <span className="text-slate-500">Sending to</span>
+                  <span className="font-mono font-semibold text-slate-800">+250{recipientPhone}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Amount</span>
+                  <span className="font-bold text-slate-900">{Number(transferAmount).toLocaleString()} RWF</span>
+                </div>
+              </div>
+
+              {/* XAI Explanation Panel */}
+              {transferExplanation && transferExplanation.available && (
+                <div className="mb-4 border border-amber-200 rounded-xl overflow-hidden">
+                  <div className="bg-amber-50 px-4 py-2.5 flex items-center gap-2 border-b border-amber-200">
+                    <Activity className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                    <span className="text-xs font-bold text-amber-800">Why was this flagged?</span>
+                    <span className="ml-auto text-[10px] text-amber-600 font-medium">{transferExplanation.method}</span>
+                  </div>
+                  <div className="bg-white px-4 py-3 space-y-2">
+                    {(transferExplanation.top_factors || []).slice(0, 3).map((f, i) => {
+                      const isRisk = f.direction === 'increases_risk';
+                      const allFactors = transferExplanation.all_factors || transferExplanation.top_factors || [];
+                      const maxImpact = Math.max(...allFactors.map(x => Math.abs(x.shap_value || 0.001)), 0.001);
+                      const pct = Math.min(Math.abs(f.shap_value || 0) / maxImpact * 100, 100);
+                      return (
+                        <div key={i}>
+                          <div className="flex items-center justify-between mb-0.5">
+                            <span className="text-xs font-medium text-slate-700">{f.label}</span>
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                              isRisk ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'
+                            }`}>
+                              {isRisk ? '↑ Risk' : '↓ Risk'}
+                            </span>
+                          </div>
+                          <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${isRisk ? 'bg-rose-400' : 'bg-emerald-400'}`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          {f.detail && <p className="text-[10px] text-slate-500 mt-0.5">{f.detail}</p>}
+                        </div>
+                      );
+                    })}
+                    <p className="text-[10px] text-slate-500 pt-1 border-t border-slate-100">
+                      ML Score: <span className="font-bold text-slate-700">{((transferExplanation.fraud_score || 0) * 100).toFixed(1)}%</span>
+                      {' '}· Threshold: <span className="font-bold text-slate-700">{((transferExplanation.threshold || 0.38) * 100).toFixed(0)}%</span>
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Alert message */}
+              {faceModalMsg.show && (
+                <div className={`p-3 rounded-lg text-xs mb-4 font-medium border ${
+                  faceModalMsg.type === 'success'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                    : 'bg-rose-50 text-rose-800 border-rose-300'
+                }`}>
+                  {faceModalMsg.message}
+                </div>
+              )}
+
+              {/* Camera / preview */}
+              <div className="rounded-xl overflow-hidden bg-slate-900 mb-4 relative" style={{ minHeight: 180 }}>
+                <video
+                  ref={transferFaceVideoRef}
+                  autoPlay muted playsInline
+                  className={`w-full object-cover ${transferFaceStream && !transferFaceCaptured ? 'block' : 'hidden'}`}
+                  style={{ maxHeight: 220 }}
+                />
+                <canvas ref={transferFaceCanvasRef} className="hidden" />
+                {transferFaceCaptured && transferFaceBase64 && (
+                  <img
+                    src={`data:image/jpeg;base64,${transferFaceBase64}`}
+                    alt="Face capture"
+                    className="w-full object-cover"
+                    style={{ maxHeight: 220 }}
+                  />
+                )}
+                {!transferFaceStream && !transferFaceCaptured && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 gap-2">
+                    <Camera className="w-10 h-10 opacity-40" />
+                    <span className="text-xs">Tap below to open camera</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Camera controls */}
+              <div className="flex gap-2 mb-4">
+                {!transferFaceStream && !transferFaceCaptured && (
+                  <Button onClick={startTransferCamera} className="flex-1 justify-center">
+                    <Camera className="w-4 h-4" /> Open Camera
+                  </Button>
+                )}
+                {transferFaceStream && !transferFaceCaptured && (
+                  <Button onClick={captureTransferFace} className="flex-1 justify-center">
+                    <Check className="w-4 h-4" /> Capture Face
+                  </Button>
+                )}
+                {transferFaceCaptured && (
+                  <>
+                    <Button variant="ghost" onClick={retakeTransferFace} className="flex-1 justify-center">
+                      <RefreshCw className="w-4 h-4" /> Retake
+                    </Button>
+                    <Button
+                      onClick={submitFaceVerifiedTransfer}
+                      disabled={faceVerifying}
+                      className="flex-1 justify-center"
+                    >
+                      <Shield className="w-4 h-4" />
+                      {faceVerifying ? 'Verifying…' : 'Confirm Transfer'}
+                    </Button>
+                  </>
+                )}
+              </div>
+
+              <button
+                onClick={closeFaceModal}
+                className="w-full py-2.5 text-xs font-semibold text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+              >
+                Cancel Transfer
+              </button>
             </div>
           </div>
         </div>

@@ -1,60 +1,65 @@
 """
-app.py — Flask REST API Server
+app.py -- Flask REST API Server
 ================================
 Routes:
   Pages
-    GET  /                        → index.html
-    GET  /login                   → login.html
-    GET  /dashboard               → dashboard.html
+    GET  /                        -> index.html
+    GET  /login                   -> login.html
+    GET  /dashboard               -> dashboard.html
 
   Auth
-    POST /api/register            → create account (+ face at signup)
-    POST /api/login               → login, get session token
-    POST /api/validate-session    → check token, return user info
-    POST /api/logout              → destroy session
-    POST /api/reset-password      → request reset token
-    POST /api/reset-password/confirm → apply new password with token
-    POST /api/update-face         → store/update face encoding
+    POST /api/register            -> create account (+ face at signup)
+    POST /api/login               -> login, get session token
+    POST /api/validate-session    -> check token, return user info
+    POST /api/logout              -> destroy session
+    POST /api/reset-password      -> request reset token
+    POST /api/reset-password/confirm -> apply new password with token
+    POST /api/update-face         -> store/update face encoding
 
   PIN
-    POST /api/verify-pin          → check PIN, track failures, block after 3
-    POST /api/set-pin             → set PIN for first time (or after reset)
-    POST /api/reset-pin           → reset PIN via National ID + face scan
+    POST /api/verify-pin          -> check PIN, track failures, block after 3
+    POST /api/set-pin             -> set PIN for first time (or after reset)
+    POST /api/reset-pin           -> reset PIN via National ID + face scan
 
   Transfers
-    POST /api/transfer            → initiate transfer (fraud-gated)
-    POST /api/calculate-fee       → fee preview before transfer
-    GET  /api/transfer-history    → paginated transfer history
-    POST /api/check-recipient     → lookup recipient name
+    POST /api/transfer            -> initiate transfer (fraud-gated)
+    POST /api/calculate-fee       -> fee preview before transfer
+    GET  /api/transfer-history    -> paginated transfer history
+    POST /api/check-recipient     -> lookup recipient name
 
   Travel
-    POST /api/travel/register     → mark user as abroad (blocks transfers)
-    POST /api/travel/reactivate   → re-enable after return
-    GET  /api/travel/status/<phone> → check travel record
+    POST /api/travel/register     -> mark user as abroad (blocks transfers)
+    POST /api/travel/reactivate   -> re-enable after return
+    GET  /api/travel/status/<phone> -> check travel record
 
   Admin / Dashboard
-    GET  /api/dashboard/stats     → system-wide statistics
-    GET  /api/fraud/alerts        → unacknowledged fraud alerts
-    POST /api/fraud/alerts/acknowledge → mark alert as seen
-    POST /api/pin/attempt         → log PIN attempt
-    GET  /api/pin/status/<phone>  → PIN security score
-    GET  /api/admin/all-users     → list all users
-    POST /api/admin/user-lookup   → look up user by phone
+    GET  /api/dashboard/stats     -> system-wide statistics
+    GET  /api/fraud/alerts        -> unacknowledged fraud alerts
+    POST /api/fraud/alerts/acknowledge -> mark alert as seen
+    POST /api/pin/attempt         -> log PIN attempt
+    GET  /api/pin/status/<phone>  -> PIN security score
+    GET  /api/admin/all-users     -> list all users
+    POST /api/admin/user-lookup   -> look up user by phone
 
   System
-    GET  /api/health              → health check
+    GET  /api/health              -> health check
+    GET  /api/xai/status          -> SHAP explainer status
+    POST /api/explain-transaction -> SHAP explanation for a transaction
 """
 
 import psycopg2
 import psycopg2.extras
 import os
+import json
 import base64
 import hashlib
 import uuid as uuid_lib
+import traceback
+import numpy as np
 from datetime import datetime
 import time
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 
 from auth_system import AuthenticationSystem
@@ -95,7 +100,84 @@ pin_monitor     = PinMonitoringSystem(user_reg)
 
 auth_system.cleanup_expired_sessions()
 
-provider_sessions = {}
+# ── Provider session helpers (DB-backed, survives server restarts) ────────────
+
+def _ensure_provider_sessions_table():
+    """Create provider_sessions table if it doesn't exist."""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS provider_sessions (
+            token       TEXT PRIMARY KEY,
+            provider_id INTEGER NOT NULL,
+            name        TEXT NOT NULL,
+            email       TEXT NOT NULL,
+            role        TEXT DEFAULT 'provider',
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at  TIMESTAMP NOT NULL
+        )
+    """)
+    conn.commit()
+    c.close()
+    conn.close()
+
+_ensure_provider_sessions_table()
+
+
+def _provider_session_create(provider_id: int, name: str, email: str) -> str:
+    """Create a DB-backed provider session. Returns the token."""
+    from datetime import timedelta
+    token      = str(uuid_lib.uuid4())
+    expires_at = datetime.now() + timedelta(hours=24)
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO provider_sessions (token, provider_id, name, email, expires_at)
+        VALUES (%s, %s, %s, %s, %s)
+    """, (token, provider_id, name, email, expires_at))
+    conn.commit()
+    c.close()
+    conn.close()
+    return token
+
+
+def _provider_session_get(token: str) -> dict | None:
+    """Return provider info for a valid, non-expired token, or None."""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("""
+        SELECT provider_id, name, email, role
+        FROM provider_sessions
+        WHERE token = %s AND expires_at > CURRENT_TIMESTAMP
+    """, (token,))
+    row = c.fetchone()
+    c.close()
+    conn.close()
+    if not row:
+        return None
+    return {"id": row[0], "name": row[1], "email": row[2], "role": row[3]}
+
+
+def _provider_session_delete(token: str):
+    """Delete a provider session (logout)."""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM provider_sessions WHERE token = %s", (token,))
+    conn.commit()
+    c.close()
+    conn.close()
+
+
+def _provider_sessions_cleanup():
+    """Remove expired provider sessions."""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM provider_sessions WHERE expires_at <= CURRENT_TIMESTAMP")
+    conn.commit()
+    c.close()
+    conn.close()
+
+_provider_sessions_cleanup()  # clean up on startup
 
 
 def _ensure_access_logs_table():
@@ -171,16 +253,17 @@ def _table_exists(conn, table: str) -> bool:
 
 
 def _ensure_pin_columns():
-    """Ensure PIN columns exist (migration-safe)."""
+    """Ensure PIN and role columns exist (migration-safe)."""
     conn = psycopg2.connect(**DB_CONFIG)
     c = conn.cursor()
     for col, typedef in [
         ("pin_hash",       "TEXT"),
-        ("pin_salt",       "TEXT"),
+        ("pin_salt",       "TEXT DEFAULT ''"),
         ("pin_attempts",   "INTEGER DEFAULT 0"),
         ("pin_blocked",    "BOOLEAN DEFAULT FALSE"),
         ("pin_fail_count", "INTEGER DEFAULT 0"),
         ("insuf_count",    "INTEGER DEFAULT 0"),
+        ("role",           "TEXT DEFAULT 'user'"),
     ]:
         try:
             c.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {typedef}")
@@ -189,6 +272,39 @@ def _ensure_pin_columns():
     conn.commit()
     conn.close()
 
+_ensure_pin_columns()
+
+
+def _reactivate_non_travel_users():
+    """
+    One-time migration: reactivate users who are marked inactive but have
+    no active travel record. This fixes accounts that were accidentally
+    deactivated by the admin UI bug (status field was always undefined).
+    Safe to run on every startup -- only touches users with no current travel.
+    """
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        c = conn.cursor()
+        c.execute("""
+            UPDATE users
+            SET is_active = TRUE
+            WHERE is_active = FALSE
+              AND email NOT LIKE '%@admin.com'
+              AND phone_number NOT IN (
+                  SELECT user_phone FROM travel_records
+                  WHERE departure_date <= NOW()
+                    AND return_date    >= NOW()
+              )
+        """)
+        rows = c.rowcount
+        conn.commit()
+        conn.close()
+        if rows > 0:
+            print(f"[Startup] Reactivated {rows} user(s) with no active travel record.")
+    except Exception as e:
+        print(f"[Startup] Reactivation migration warning: {e}")
+
+_reactivate_non_travel_users()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PAGE ROUTES
@@ -196,7 +312,7 @@ def _ensure_pin_columns():
 
 @app.route("/")
 def index():
-    return _ok({"message": "MoMo Shield API v2.0 — use /api/* endpoints"})
+    return _ok({"message": "MoMo Shield API v2.0 -- use /api/* endpoints"})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -251,7 +367,6 @@ def register():
         return _ok(result) if result["success"] else _err(result["error"])
 
     except Exception as e:
-        import traceback
         traceback.print_exc()
         return _err(f"Registration failed: {e}", 500)
 
@@ -259,7 +374,7 @@ def register():
 @app.route("/api/validate-face", methods=["POST"])
 def validate_face():
     """
-    Validate face quality ONLY — detect + check landmarks.
+    Validate face quality ONLY -- detect + check landmarks.
     Never saves to disk or DB. Used by Reset PIN and fraud face gate.
     """
     try:
@@ -271,7 +386,8 @@ def validate_face():
 
         result = user_reg.validate_face_quality_only(face_b64)
 
-        if result["error"]:
+        if result.get("error"):
+            # Return the specific error message so the frontend can show it
             return _err(result["error"])
 
         return _ok({
@@ -282,7 +398,8 @@ def validate_face():
         })
 
     except Exception as e:
-        return _err(f"Face validation failed: {e}", 500)
+        traceback.print_exc()
+        return _err(f"Face validation failed: {str(e)}", 500)
 
 
 @app.route("/api/login", methods=["POST"])
@@ -300,19 +417,14 @@ def login():
         conn.close()
 
         if provider:
-            import uuid
-            token = str(uuid.uuid4())
-            provider_sessions[token] = {
-                "id": provider[0], "name": provider[1],
-                "email": provider[2], "role": "provider"
-            }
+            token = _provider_session_create(provider[0], provider[1], provider[2])
             _log_access("LOGIN", provider[2], provider[1], "provider", "SUCCESS")
             return _ok({
-                "success": True,
-                "session_token": token,
-                "user": {"name": provider[1], "email": provider[2]},
+                "success"       : True,
+                "session_token" : token,
+                "user"          : {"name": provider[1], "email": provider[2]},
                 "dashboard_type": "provider",
-                "dashboard_url": "/provider_dashboard"
+                "dashboard_url" : "/provider_dashboard"
             })
 
         result = auth_system.authenticate_user(password=password, email=email or None)
@@ -360,52 +472,50 @@ def validate_session():
         data  = request.get_json() or {}
         token = data.get("session_token", "")
 
-        if token in provider_sessions:
-            provider = provider_sessions[token]
-            if provider.get("role") == "provider":
-                return _ok({
-                    "success": True,
-                    "user": {"name": provider["name"], "email": provider["email"]},
-                    "dashboard_type": "provider",
-                    "dashboard_url": "/provider_dashboard"
-                })
+        # Check DB-backed provider session first
+        provider = _provider_session_get(token)
+        if provider:
+            return _ok({
+                "success"       : True,
+                "user"          : {"name": provider["name"], "email": provider["email"]},
+                "dashboard_type": "provider",
+                "dashboard_url" : "/provider_dashboard"
+            })
 
         user = auth_system.validate_session(token)
         if user:
+            role       = user.get("role", "user") or "user"
             user_email = user.get("email", "")
-            is_admin = user_email.endswith("@admin.com")
-            is_provider = user_email.endswith("@provider.com")
-            
-            if is_admin:
+
+            if role == "admin" or user_email.endswith("@admin.com"):
                 dashboard_type = "admin"
-                dashboard_url = "/admin_dashboard"
-            elif is_provider:
+                dashboard_url  = "/admin_dashboard"
+            elif role == "provider" or user_email.endswith("@provider.com"):
                 dashboard_type = "provider"
-                dashboard_url = "/provider_dashboard"
+                dashboard_url  = "/provider_dashboard"
             else:
                 dashboard_type = "user"
-                dashboard_url = "/user_dashboard"
+                dashboard_url  = "/user_dashboard"
 
-            # Include PIN status
-            phone = user.get("phone", "")
-            has_pin = False
+            phone       = user.get("phone", "")
+            has_pin     = False
             pin_blocked = False
             if phone:
                 conn = psycopg2.connect(**DB_CONFIG)
-                cv = conn.cursor()
+                cv   = conn.cursor()
                 cv.execute("SELECT pin_hash, pin_blocked FROM users WHERE phone_number=%s", (phone,))
                 row = cv.fetchone()
                 conn.close()
                 has_pin     = bool(row and row[0])
-                pin_blocked  = bool(row and row[1])
+                pin_blocked = bool(row and row[1])
 
             return _ok({
-                "success": True,
-                "user": user,
-                "has_pin": has_pin,
-                "pin_blocked": pin_blocked,
+                "success"       : True,
+                "user"          : user,
+                "has_pin"       : has_pin,
+                "pin_blocked"   : pin_blocked,
                 "dashboard_type": dashboard_type,
-                "dashboard_url": dashboard_url
+                "dashboard_url" : dashboard_url
             })
         return _err("Session expired or invalid.", 401)
     except Exception as e:
@@ -417,16 +527,16 @@ def logout():
     try:
         data  = request.get_json() or {}
         token = data.get("session_token", "") or _session_token() or ""
-        # Try to find who is logging out for the log entry
         try:
             user = auth_system.validate_session(token)
             if user:
                 _log_access("LOGOUT", user.get("email",""), user.get("name",""), "user", "SUCCESS")
             else:
-                # Check provider sessions
-                prov = provider_sessions.get(token)
+                prov = _provider_session_get(token)
                 if prov:
                     _log_access("LOGOUT", prov.get("email",""), prov.get("name",""), "provider", "SUCCESS")
+                    _provider_session_delete(token)
+                    return _ok({"success": True, "message": "Logged out successfully."})
         except Exception:
             pass
         return _ok(auth_system.logout(token))
@@ -527,15 +637,15 @@ def update_face():
                         user.get("name", ""),
                         "user",
                         "FAILED",
-                        "Face does not match registered face — update rejected"
+                        "Face does not match registered face -- update rejected"
                     )
                     return _err(
-                        " Face verification failed — your face does not match the registered face on this account.\n\n"
+                        " Face verification failed -- your face does not match the registered face on this account.\n\n"
                         "Possible reasons:\n"
                         "• You are not the registered owner of this account\n"
-                        "• Poor lighting — move to a brighter area and try again\n"
+                        "• Poor lighting -- move to a brighter area and try again\n"
                         "• Remove glasses, hat, or anything covering your face\n"
-                        "• Look directly at the camera — avoid angles\n\n"
+                        "• Look directly at the camera -- avoid angles\n\n"
                         "This attempt has been blocked and logged for security. "
                         "If this is truly your account, contact support with your National ID."
                     )
@@ -549,7 +659,7 @@ def update_face():
                 )
                 return _err(err_msg or "Face verification failed.")
 
-        # ── Run the update — overwrites existing DB encoding + folder image ──
+        # ── Run the update -- overwrites existing DB encoding + folder image ──
         result = user_reg.update_face_encoding(validated_phone, face_b64, overwrite=True)
         return _ok(result) if result["success"] else _err(result["error"])
 
@@ -599,7 +709,7 @@ def set_pin():
 def verify_pin():
     """
     Verify transaction PIN.
-    - Wrong PIN 3 times → pin_blocked = 1
+    - Wrong PIN 3 times -> pin_blocked = 1
     - Returns: { success, blocked, remaining }
     """
     try:
@@ -639,7 +749,7 @@ def verify_pin():
 
         # Check PIN
         if _hash_pin(pin) == pin_hash:
-            # Correct — reset fail count
+            # Correct -- reset fail count
             cp.execute(
                 "UPDATE users SET pin_fail_count=0 WHERE phone_number=%s",
                 (user["phone"],)
@@ -657,11 +767,11 @@ def verify_pin():
                 )
                 conn.commit()
                 conn.close()
-                # Raise fraud alert — 3 wrong PIN attempts is suspicious
+                # Raise fraud alert -- 3 wrong PIN attempts is suspicious
                 try:
                     fraud_detector.alert_system.raise_alert(
                         user["phone"], 0, 0.85, "HIGH", "BLOCK",
-                        f"PIN blocked — 3 consecutive incorrect PIN attempts. "
+                        f"PIN blocked -- 3 consecutive incorrect PIN attempts. "
                         f"Possible unauthorized access attempt on account {user['phone']}."
                     )
                 except Exception:
@@ -682,7 +792,7 @@ def verify_pin():
                 try:
                     fraud_detector.alert_system.raise_alert(
                         user["phone"], 0, 0.5 + (fail_count * 0.15), "MEDIUM", "REQUIRE_FACE",
-                        f"Incorrect PIN — attempt {fail_count} of 3. "
+                        f"Incorrect PIN -- attempt {fail_count} of 3. "
                         f"{remaining} attempt{'s' if remaining != 1 else ''} remaining before account locks."
                     )
                 except Exception:
@@ -703,7 +813,7 @@ def verify_identity():
     Step-1 identity gate for Reset PIN and Update Face.
     Accepts phone_number + national_id and confirms they match a DB record.
     Returns { success, name } on match or { error } on mismatch.
-    Does NOT require a session token — the user may be locked out.
+    Does NOT require a session token -- the user may be locked out.
     """
     try:
         data        = request.get_json() or {}
@@ -827,65 +937,100 @@ def reset_pin():
 
 def _verify_face(face_b64: str, stored_encoding_bytes: bytes) -> dict:
     """
-    Validate face quality then compare against the stored encoding.
+    Verify a live face image against a stored encoding.
     Returns { match: bool, reason: str }.
-    NEVER falls back to approving a face if face_recognition is unavailable —
-    missing library is treated as a hard failure to prevent bypass.
+    Uses face_recognition for both quality check and encoding extraction.
     """
     try:
-        import numpy as np
+        import face_recognition
+        import io as _io
+        from PIL import Image as _PILImg
 
-        # ── Step 1: Quality check ONLY — never saves to disk ────────────────
-        # validate_face_quality_only runs all the same gates (brightness, size,
-        # landmarks, eye openness, head upright) but never writes a file.
-        # extract_face_encoding_from_base64 is ONLY used during registration.
-        quality = user_reg.validate_face_quality_only(face_b64)
-        if quality["error"]:
-            return {"match": False, "reason": quality["error"]}
+        # ── Step 1: Decode and detect live face ──────────────────────────
+        img_bytes = base64.b64decode(face_b64)
+        img       = _PILImg.open(_io.BytesIO(img_bytes)).convert("RGB")
 
-        # ── Step 2: Compare submitted encoding against stored encoding ────────
-        try:
-            import face_recognition
-        except ImportError:
-            # face_recognition library is not installed — HARD FAIL.
-            # Never auto-approve: that would allow anyone to bypass face checks.
-            return {
-                "match": False,
-                "reason": (
-                    "Face verification library is not available on this server. "
-                    "Face check cannot be completed — action blocked for security. "
-                    "Please contact support to resolve this."
-                )
-            }
+        # Upscale small images
+        w, h = img.size
+        if w < 320 or h < 240:
+            scale = max(320 / w, 240 / h)
+            img = img.resize((int(w * scale), int(h * scale)), _PILImg.LANCZOS)
+        img_array = np.array(img)
 
-        submitted_encoding = np.frombuffer(quality["encoding"], dtype=np.float64)
-        if len(submitted_encoding) != 128:
-            submitted_encoding = np.frombuffer(quality["encoding"], dtype=np.float32).astype(np.float64)
+        # Brightness check
+        avg_brightness = img_array.mean()
+        if avg_brightness < 25:
+            return {"match": False, "reason": "Image is too dark. Please improve lighting and try again."}
+        if avg_brightness > 248:
+            return {"match": False, "reason": "Image is overexposed. Reduce lighting and try again."}
 
-        stored_encoding = np.frombuffer(stored_encoding_bytes, dtype=np.float64)
-        if len(stored_encoding) != 128:
-            stored_encoding = np.frombuffer(stored_encoding_bytes, dtype=np.float32).astype(np.float64)
-        if len(stored_encoding) != 128:
+        # Detect face with upsampling
+        live_locs = face_recognition.face_locations(img_array, model="hog", number_of_times_to_upsample=2)
+        if not live_locs:
+            img_up = img.resize((img.width * 2, img.height * 2), _PILImg.LANCZOS)
+            live_locs_up = face_recognition.face_locations(np.array(img_up), model="hog", number_of_times_to_upsample=1)
+            if live_locs_up:
+                live_locs = [(t//2, r//2, b//2, l//2) for t, r, b, l in live_locs_up]
+            else:
+                return {"match": False, "reason": "No face detected. Ensure your face is centred, well-lit, and not obscured."}
+
+        if len(live_locs) > 1:
+            return {"match": False, "reason": "Multiple faces detected. Only your face should be visible."}
+
+        # Extract 128-dim encoding from live image
+        live_encs = face_recognition.face_encodings(img_array, live_locs)
+        if not live_encs:
+            return {"match": False, "reason": "Could not generate face encoding. Try again with better lighting."}
+        live_enc = live_encs[0]
+
+        # ── Step 2: Decode stored encoding ───────────────────────────────
+        stored_bytes = bytes(stored_encoding_bytes)
+        if len(stored_bytes) == 1024:
+            stored_enc = np.frombuffer(stored_bytes, dtype=np.float64)
+        elif len(stored_bytes) == 512:
+            stored_enc = np.frombuffer(stored_bytes, dtype=np.float32).astype(np.float64)
+        else:
+            # Legacy: stored as raw JPEG -- re-extract encoding
+            try:
+                stored_img  = _PILImg.open(_io.BytesIO(stored_bytes)).convert("RGB")
+                stored_encs = face_recognition.face_encodings(np.array(stored_img))
+                if not stored_encs:
+                    return {"match": False, "reason": "Stored face is unreadable. Please update your face in settings."}
+                stored_enc = stored_encs[0]
+            except Exception as _e:
+                return {"match": False, "reason": "Stored face data is corrupted. Please update your face in settings."}
+
+        if len(stored_enc) != 128:
             return {"match": False, "reason": "Stored face encoding is corrupted. Contact support."}
 
-        distance = face_recognition.face_distance([stored_encoding], submitted_encoding)[0]
+        # ── Step 3: Compare ───────────────────────────────────────────────
+        distance = face_recognition.face_distance([stored_enc], live_enc)[0]
         if distance <= 0.55:
             return {"match": True, "reason": f"Face matched (distance: {distance:.3f})"}
         else:
             return {
                 "match": False,
                 "reason": (
-                    " Face verification failed — this face does not match the account owner.\n\n"
+                    "Face verification failed -- this face does not match the account owner.\n\n"
                     "Possible reasons:\n"
                     "• You are not the registered owner of this account\n"
-                    "• Poor lighting — move to a brighter area and try again\n"
+                    "• Poor lighting -- move to a brighter area and try again\n"
                     "• Remove glasses, hat, or anything covering your face\n"
-                    "• Look directly at the camera — avoid angles\n\n"
+                    "• Look directly at the camera -- avoid angles\n\n"
                     "This attempt has been blocked and logged for security. "
                     "If this is truly your account, contact support with your National ID."
                 )
             }
 
+    except ImportError:
+        return {
+            "match": False,
+            "reason": (
+                "Face verification library is not available on this server. "
+                "Face check cannot be completed -- action blocked for security. "
+                "Please contact support to resolve this."
+            )
+        }
     except Exception as e:
         return {"match": False, "reason": f"Verification error: {e}"}
 
@@ -924,6 +1069,58 @@ def transfer():
 
     except Exception as e:
         return _err(f"Transfer failed: {e}", 500)
+
+
+@app.route("/api/explain-transaction", methods=["POST"])
+def explain_transaction():
+    """
+    Standard explanation: Rule-based + Feature Importance.
+    Fast, always works. Used by manager fraud alerts.
+    Accepts: { phone_number, amount, network }
+    """
+    try:
+        data    = request.get_json() or {}
+        phone   = data.get("phone_number", "").strip()
+        amount  = float(data.get("amount", 0))
+        network = data.get("network", "MTN").strip()
+        if not phone or amount <= 0:
+            return _err("phone_number and amount are required.")
+        explanation = fraud_detector.explain_transaction(phone, amount, network, mode="standard")
+        return _ok({"success": True, "explanation": explanation})
+    except Exception as e:
+        return _err(f"Explanation failed: {e}", 500)
+
+
+@app.route("/api/explain-transaction/deep", methods=["POST"])
+def explain_transaction_deep():
+    """
+    Deep explanation: Rule-based + Feature Importance + SHAP.
+    Slower. Admin-only for fraud pattern analysis.
+    Accepts: { phone_number, amount, network }
+    """
+    try:
+        data    = request.get_json() or {}
+        phone   = data.get("phone_number", "").strip()
+        amount  = float(data.get("amount", 0))
+        network = data.get("network", "MTN").strip()
+        if not phone or amount <= 0:
+            return _err("phone_number and amount are required.")
+        explanation = fraud_detector.explain_transaction(phone, amount, network, mode="deep")
+        return _ok({"success": True, "explanation": explanation})
+    except Exception as e:
+        return _err(f"Deep explanation failed: {e}", 500)
+
+
+@app.route("/api/xai/status", methods=["GET"])
+def xai_status():
+    """Return whether SHAP is available and the explainer is loaded."""
+    return _ok({
+        "success"       : True,
+        "shap_available": fraud_detector.explainer is not None,
+        "method"        : "SHAP TreeExplainer" if fraud_detector.explainer else "Rule-Based Fallback",
+        "model"         : fraud_detector.config.get("best_model", "unknown"),
+        "n_features"    : fraud_detector.config.get("n_features", 20),
+    })
 
 
 @app.route("/api/calculate-fee", methods=["POST"])
@@ -971,8 +1168,7 @@ def check_recipient():
         full_name, is_active = row[0], bool(row[1])
 
         if not is_active:
-            import datetime
-            today = datetime.date.today().isoformat()
+            today = datetime.now().date().isoformat()
             c.execute("""
                 SELECT destination_country, return_date FROM travel_records
                 WHERE user_phone=%s
@@ -985,7 +1181,7 @@ def check_recipient():
             if travel:
                 return _ok({"success": True, "registered": True, "name": full_name,
                             "blocked": True,
-                            "blocked_reason": f"✈️ Recipient is abroad in {travel[0]} until {travel[1]}."})
+                            "blocked_reason": f"Recipient is abroad in {travel[0]} until {travel[1]}."})
             return _ok({"success": True, "registered": True, "name": full_name,
                         "blocked": True, "blocked_reason": "This account is deactivated."})
 
@@ -1035,6 +1231,57 @@ def travel_status(phone):
         return _err(f"Travel status failed: {e}", 500)
 
 
+@app.route("/api/admin/travel/status", methods=["POST", "GET"])
+def admin_travel_status():
+    """POST alias used by the manager dashboard -- accepts phone_number in body."""
+    try:
+        data  = request.get_json() or {}
+        phone = data.get("phone_number", "").strip()
+        if not phone:
+            # Also accept query param for GET
+            phone = request.args.get("phone", "").strip()
+        if not phone:
+            return _err("phone_number is required.")
+        validated = auth_system.validate_phone_number(phone)
+        if not validated:
+            return _err("Invalid phone number format.")
+        travel_info = travel_system.get_travel_status(validated)
+        return _ok({"success": True, "travel_info": travel_info})
+    except Exception as e:
+        return _err(f"Travel status failed: {e}", 500)
+
+
+@app.route("/api/admin/travel/register", methods=["POST"])
+def admin_register_travel():
+    """Admin/manager alias for travel registration."""
+    try:
+        data = request.get_json() or {}
+        phone = data.get("phone_number", "").strip()
+        departure = data.get("departure_date", "").strip()
+        return_date = data.get("return_date", "").strip()
+        destination = data.get("destination", data.get("destination_country", "")).strip()
+        if not all([phone, departure, return_date, destination]):
+            return _err("phone_number, departure_date, return_date, and destination are required.")
+        result = travel_system.register_travel(phone, departure, return_date, destination)
+        return _ok(result) if result["success"] else _err(result["error"])
+    except Exception as e:
+        return _err(f"Travel registration failed: {e}", 500)
+
+
+@app.route("/api/admin/travel/reactivate", methods=["POST"])
+def admin_reactivate_sim():
+    """Admin/manager alias for SIM reactivation."""
+    try:
+        data  = request.get_json() or {}
+        phone = data.get("phone_number", "").strip()
+        if not phone:
+            return _err("phone_number required.")
+        result = travel_system.reactivate_on_return(phone)
+        return _ok(result) if result["success"] else _err(result["error"])
+    except Exception as e:
+        return _err(f"Reactivation failed: {e}", 500)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # ADMIN / DASHBOARD ROUTES
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1076,7 +1323,8 @@ def dashboard_stats():
         }
 
         transfers_7d = stats["transfers_7d"] or 1
-        stats["fraud_rate_7d"] = round(stats["fraud_blocked_7d"] / transfers_7d * 100, 2)
+        stats["fraud_rate_7d"]   = round(stats["fraud_blocked_7d"] / transfers_7d * 100, 2)
+        stats["unacked_alerts"]  = stats["fraud_alerts"]   # alias for provider sidebar badge
 
         conn.close()
         return _ok({"success": True, "stats": stats})
@@ -1433,7 +1681,7 @@ def admin_get_access_logs():
                 "ip_address": row[5] or "",
                 "status":     row[6],
                 "detail":     row[7] or "",
-                "created_at": row[8].strftime("%d/%m/%Y %H:%M:%S") if row[8] else "—"
+                "created_at": row[8].strftime("%d/%m/%Y %H:%M:%S") if row[8] else "--"
             }
             for row in rows
         ]
@@ -1465,7 +1713,8 @@ def admin_get_fraud_alerts():
                 fa.alert_message,
                 fa.acknowledged,
                 fa.created_at,
-                u.full_name
+                u.full_name,
+                fa.explanation
             FROM fraud_alerts fa
             LEFT JOIN users u ON fa.phone_number = u.phone_number
             ORDER BY fa.created_at DESC
@@ -1474,16 +1723,17 @@ def admin_get_fraud_alerts():
 
         alerts = [
             {
-                "id": row[0],
+                "id"          : row[0],
                 "phone_number": row[1],
-                "amount": row[2],
-                "fraud_score": row[3],
-                "risk_level": row[4],
-                "action": row[5],
-                "message": row[6],
+                "amount"      : row[2],
+                "fraud_score" : row[3],
+                "risk_level"  : row[4],
+                "action"      : row[5],
+                "message"     : row[6],
                 "acknowledged": bool(row[7]),
-                "created_at": row[8],
-                "user_name": row[9] or "Unknown"
+                "created_at"  : row[8],
+                "user_name"   : row[9] or "Unknown",
+                "explanation" : row[10],   # stored at alert-creation time
             }
             for row in c.fetchall()
         ]
@@ -1603,28 +1853,56 @@ def admin_update_user():
 @app.route("/api/admin/delete-user", methods=["POST"])
 def admin_delete_user():
     try:
-        data = request.get_json() or {}
+        data  = request.get_json() or {}
         phone = data.get("phone_number", "").strip()
-        
+
         if not phone:
             return _err("Phone number is required.")
-        
+
         conn = psycopg2.connect(**DB_CONFIG)
-        c = conn.cursor()
-        
-        # Delete user
-        c.execute("DELETE FROM users WHERE phone_number=%s", (phone,))
-        if c.rowcount == 0:
+        c    = conn.cursor()
+
+        # Confirm user exists first
+        c.execute("SELECT id, email FROM users WHERE phone_number=%s", (phone,))
+        row = c.fetchone()
+        if not row:
             conn.close()
             return _err("User not found.")
-        
+
+        user_id, user_email = row[0], row[1]
+
+        # Delete all dependent rows in FK order before deleting the user
+        # 1. Sessions
+        c.execute("DELETE FROM user_sessions WHERE user_id=%s", (user_id,))
+        # 2. Over-balance attempts
+        c.execute("DELETE FROM over_balance_attempts WHERE user_id=%s", (user_id,))
+        # 3. Pending deposits
+        c.execute("DELETE FROM pending_deposits WHERE user_id=%s", (user_id,))
+        # 4. PIN attempts (FK on phone_number)
+        c.execute("DELETE FROM pin_attempts WHERE user_phone=%s", (phone,))
+        # 5. Transaction history (FK on phone_number)
+        c.execute("DELETE FROM transaction_history WHERE user_phone=%s", (phone,))
+        # 6. Travel records (FK on phone_number)
+        c.execute("DELETE FROM travel_records WHERE user_phone=%s", (phone,))
+        # 7. Money transfers sent by this user (FK on sender_id)
+        c.execute("DELETE FROM money_transfers WHERE sender_id=%s", (user_id,))
+        # 8. Fraud alerts (no FK but references phone)
+        c.execute("DELETE FROM fraud_alerts WHERE phone_number=%s", (phone,))
+        # 9. Access logs (no FK -- keep for audit, just nullify identifier)
+        c.execute(
+            "UPDATE access_logs SET identifier='[deleted]', full_name='[deleted]' "
+            "WHERE identifier=%s OR identifier=%s",
+            (phone, user_email)
+        )
+
+        # Finally delete the user
+        c.execute("DELETE FROM users WHERE id=%s", (user_id,))
+
         conn.commit()
         conn.close()
-        
-        return _ok({
-            "success": True,
-            "message": "User deleted successfully"
-        })
+
+        return _ok({"success": True, "message": "Customer deleted successfully."})
+
     except Exception as e:
         return _err(f"Failed to delete user: {e}", 500)
 
@@ -1635,64 +1913,134 @@ def admin_delete_user():
 
 @app.route("/api/admin/backup", methods=["POST"])
 def admin_create_backup():
+    """
+    Runs pg_dump and streams the result directly as a downloadable .sql file.
+    No temp file left on disk.
+    """
     try:
-        import shutil
-        from datetime import datetime
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = f"backup_{timestamp}.db"
-        
-        # Create backup
-        # PostgreSQL backup via pg_dump
         import subprocess
+        from flask import Response
+        import io
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename  = f"momo_shield_backup_{timestamp}.sql"
+
         result_proc = subprocess.run(
-            ["pg_dump", "-U", DB_CONFIG["user"], "-h", DB_CONFIG["host"],
-             "-p", DB_CONFIG["port"], "-F", "c", "-f", backup_path, DB_CONFIG["dbname"]],
-            capture_output=True, text=True,
-            env={**os.environ, "PGPASSWORD": DB_CONFIG["password"]}
+            [
+                "pg_dump",
+                "-U", DB_CONFIG["user"],
+                "-h", DB_CONFIG["host"],
+                "-p", DB_CONFIG["port"],
+                "--no-password",
+                "--format=plain",
+                "--encoding=UTF8",
+                DB_CONFIG["dbname"],
+            ],
+            capture_output=True,
+            env={**os.environ, "PGPASSWORD": DB_CONFIG["password"]},
         )
+
         if result_proc.returncode != 0:
-            return _err(f"pg_dump failed: {result_proc.stderr}")
-        
-        return _ok({
-            "success": True,
-            "message": "Backup created successfully",
-            "backup_file": backup_path
-        })
+            err_msg = result_proc.stderr.decode("utf-8", errors="replace")
+            return _err(f"pg_dump failed: {err_msg[:300]}", 500)
+
+        sql_bytes = result_proc.stdout
+
+        return Response(
+            io.BytesIO(sql_bytes),
+            mimetype="application/octet-stream",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length"     : str(len(sql_bytes)),
+            },
+        )
+    except FileNotFoundError:
+        return _err("pg_dump not found. Make sure PostgreSQL bin directory is in PATH.", 500)
     except Exception as e:
         return _err(f"Failed to create backup: {e}", 500)
 
 
-@app.route("/api/admin/system-stats", methods=["GET"])
-def admin_system_stats():
+@app.route("/api/admin/settings", methods=["POST", "GET"])
+def admin_settings():
+    """
+    GET  -> return current settings from fraud_config.json + DB
+    POST -> persist settings to fraud_config.json and update live fraud threshold
+    """
     try:
-        import os
-        
-        # Database size
+        if request.method == "GET":
+            conn = psycopg2.connect(**DB_CONFIG)
+            c = conn.cursor()
+            c.execute("SELECT COUNT(*) FROM users WHERE email NOT LIKE '%@admin.com'")
+            total_users = c.fetchone()[0]
+            conn.close()
+            return _ok({
+                "success": True,
+                "settings": {
+                    "system_name"    : "MoMo Shield",
+                    "max_transfer"   : 2_000_000,
+                    "fraud_threshold": fraud_detector.threshold,
+                    "session_timeout": 24 * 60,
+                    "max_pin_attempts": 3,
+                    "total_users"    : total_users,
+                }
+            })
+
+        # POST -- save settings
+        data = request.get_json() or {}
+
+        # 1. Update fraud threshold in memory + config file
+        new_threshold = data.get("fraud_threshold")
+        if new_threshold is not None:
+            try:
+                t = float(new_threshold)
+                if 0.0 < t < 1.0:
+                    fraud_detector.threshold = t
+                    # Persist to fraud_config.json
+                    cfg_path = "fraud_config.json"
+                    if os.path.exists(cfg_path):
+                        with open(cfg_path, "r") as f:
+                            cfg = json.load(f)
+                        cfg["threshold"] = t
+                        with open(cfg_path, "w") as f:
+                            json.dump(cfg, f, indent=2)
+            except (ValueError, TypeError):
+                pass
+
+        # 2. Update max_pin_attempts in users table default (informational -- stored in config)
+        max_pin = data.get("max_pin_attempts")
+        system_name = data.get("system_name", "MoMo Shield")
+
+        # 3. Persist all settings to a simple settings table (create if not exists)
         conn = psycopg2.connect(**DB_CONFIG)
         c = conn.cursor()
-        c.execute("SELECT pg_database_size(%s)", (DB_CONFIG["dbname"],))
-        db_size_mb = round(c.fetchone()[0] / (1024 * 1024), 2)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS system_settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        settings_to_save = {
+            "system_name"    : str(system_name),
+            "max_transfer"   : str(data.get("max_transfer", 2_000_000)),
+            "fraud_threshold": str(new_threshold or fraud_detector.threshold),
+            "session_timeout": str(data.get("session_timeout", 1440)),
+            "max_pin_attempts": str(max_pin or 3),
+        }
+        for key, value in settings_to_save.items():
+            c.execute("""
+                INSERT INTO system_settings (key, value, updated_at)
+                VALUES (%s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (key) DO UPDATE
+                SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+            """, (key, value))
+        conn.commit()
         conn.close()
 
-        active_user_sessions = len(provider_sessions)
-        active_provider_sessions = len(provider_sessions)
-        
-        # System uptime (simplified)
-        uptime_seconds = 3600  # Placeholder
-        
-        return _ok({
-            "success": True,
-            "stats": {
-                "database_size_mb": db_size_mb,
-                "active_user_sessions": active_user_sessions,
-                "active_provider_sessions": active_provider_sessions,
-                "uptime_seconds": uptime_seconds,
-                "system_status": "healthy"
-            }
-        })
+        return _ok({"success": True, "message": "Settings saved successfully."})
+
     except Exception as e:
-        return _err(f"Failed to get system stats: {e}", 500)
+        return _err(f"Settings operation failed: {e}", 500)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1706,8 +2054,8 @@ def health():
         "timestamp" : datetime.now().isoformat(),
         "version"   : "2.0.0",
         "ml_model"  : fraud_detector.config.get("best_model", "not loaded"),
-        "threshold" : fraud_detector.config.get("threshold", "—"),
-        "fraud_f1"  : fraud_detector.config.get("fraud_f1", "—"),
+        "threshold" : fraud_detector.config.get("threshold", "--"),
+        "fraud_f1"  : fraud_detector.config.get("fraud_f1", "--"),
     })
 
 
@@ -1730,18 +2078,64 @@ def server_error(e):
 def user_balance():
     try:
         data = request.get_json() or {}
-        token = data.get("session_token") or _session_token()  # ← accept both
+        token = data.get("session_token") or _session_token()
         if not token:
             return _err("Missing session token.", 401)
         user = auth_system.validate_session(token)
         if not user:
             return _err("Invalid session.", 401)
+
         conn = psycopg2.connect(**DB_CONFIG)
         c = conn.cursor()
+
+        # Current balance
         c.execute("SELECT account_balance FROM users WHERE phone_number=%s", (user["phone"],))
         row = c.fetchone()
+        balance = row[0] if row else 0.0
+
+        # Recent transactions (sent)
+        c.execute("""
+            SELECT mt.id, mt.recipient_phone, mt.amount, COALESCE(mt.fee,0),
+                   mt.status, mt.created_at, mt.fraud_score, mt.risk_level,
+                   u.phone_number AS sender_phone, 'sent' AS direction
+            FROM money_transfers mt
+            JOIN users u ON mt.sender_id = u.id
+            WHERE u.phone_number = %s
+            ORDER BY mt.created_at DESC LIMIT 10
+        """, (user["phone"],))
+        sent = c.fetchall()
+
+        # Recent transactions (received)
+        c.execute("""
+            SELECT mt.id, mt.recipient_phone, mt.amount, 0,
+                   mt.status, mt.created_at, mt.fraud_score, mt.risk_level,
+                   u.phone_number AS sender_phone, 'received' AS direction
+            FROM money_transfers mt
+            JOIN users u ON mt.sender_id = u.id
+            WHERE mt.recipient_phone = %s AND mt.status = 'completed'
+            ORDER BY mt.created_at DESC LIMIT 10
+        """, (user["phone"],))
+        received = c.fetchall()
         conn.close()
-        return _ok({"success": True, "balance": row[0] if row else 0})
+
+        # Merge, sort, take top 10
+        all_rows = sorted(list(sent) + list(received),
+                          key=lambda x: x[5] or "", reverse=True)[:10]
+
+        transactions = [{
+            "id"            : r[0],
+            "recipient_phone": r[1],
+            "amount"        : r[2],
+            "fee"           : r[3],
+            "status"        : r[4],
+            "created_at"    : r[5].isoformat() if r[5] else None,
+            "fraud_score"   : r[6],
+            "risk_level"    : r[7],
+            "sender_phone"  : r[8],
+            "direction"     : r[9],
+        } for r in all_rows]
+
+        return _ok({"success": True, "balance": balance, "transactions": transactions})
     except Exception as e:
         return _err(f"Balance fetch failed: {e}", 500)
 
@@ -1755,7 +2149,7 @@ def user_history_post():
     limit = data.get("limit", 50)
     result = transfer_system.get_transfer_history(token, limit)
     if result["success"]:
-        # rename "transfers" → "history" so frontend can read d.history
+        # rename "transfers" -> "history" so frontend can read d.history
         result["history"] = result.pop("transfers", [])
         return _ok(result)
     return _err(result["error"])
@@ -1765,7 +2159,7 @@ def user_history_post():
 def user_profile():
     try:
         data = request.get_json() or {}
-        token = data.get("session_token") or _session_token()  # ← accept both
+        token = data.get("session_token") or _session_token()  # <- accept both
         if not token:
             return _err("Missing session token.", 401)
         user = auth_system.validate_session(token)
@@ -1781,7 +2175,7 @@ def user_profile():
         conn.close()
         if not row:
             return _err("User not found.")
-        return _ok({"success": True, "user": {   # ← key must be "user" not "profile"
+        return _ok({"success": True, "user": {   # <- key must be "user" not "profile"
             "name": row[0], "email": row[1], "phone": row[2],
             "national_id": row[3], "balance": row[4], "sex": row[5]
         }})
