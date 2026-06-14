@@ -14,7 +14,34 @@ import psycopg2.extras
 import hashlib
 import secrets
 import re
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
+
+# ── Email config ──────────────────────────────────────────────────────────
+import os as _os
+SMTP_HOST     = "smtp.gmail.com"
+SMTP_PORT     = 587
+SMTP_USERNAME = _os.environ.get("SMTP_USERNAME", "ruhamorose@gmail.com")
+SMTP_PASSWORD = _os.environ.get("SMTP_PASSWORD", "")
+
+def _send_email(to_email: str, subject: str, html_body: str):
+    """Send an HTML email. Fails silently so it never blocks the main flow."""
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"]    = f"MoMo Shield <{SMTP_USERNAME}>"
+        msg["To"]      = to_email
+        msg.attach(MIMEText(html_body, "html"))
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            server.sendmail(SMTP_USERNAME, to_email, msg.as_string())
+        print(f"[Email] Sent '{subject}' to {to_email}")
+    except Exception as e:
+        print(f"[Email] Failed to send to {to_email}: {e}")
 
 
 class AuthenticationSystem:
@@ -26,9 +53,9 @@ class AuthenticationSystem:
         """Create and return a PostgreSQL database connection."""
         return psycopg2.connect(**self.db_config)
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # DATABASE INIT
-    # ─────────────────────────────────────────────────────────────────────
+    # 
 
     def init_database(self):
         """Create auth-related tables if they do not exist."""
@@ -103,9 +130,9 @@ class AuthenticationSystem:
         c.close()
         conn.close()
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # VALIDATION HELPERS
-    # ─────────────────────────────────────────────────────────────────────
+    # 
 
     def validate_phone_number(self, phone: str) -> str | None:
         """
@@ -154,9 +181,9 @@ class AuthenticationSystem:
             return False, "Password must contain at least one special character."
         return True, ""
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # PASSWORD HASHING
-    # ─────────────────────────────────────────────────────────────────────
+    # 
 
     def hash_password(self, password: str, salt: str = None) -> tuple[str, str]:
         if salt is None:
@@ -164,9 +191,9 @@ class AuthenticationSystem:
         pw_hash = hashlib.sha256((password + salt).encode()).hexdigest()
         return pw_hash, salt
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # ACCOUNT CREATION
-    # ─────────────────────────────────────────────────────────────────────
+    # 
 
     def create_account(self, phone_number: str, full_name: str,
                        national_id: str, email: str, password: str,
@@ -178,7 +205,7 @@ class AuthenticationSystem:
         captured on the registration page.  If provided, the face encoding
         is extracted and stored so that face verification works later.
         """
-        # ── Validate inputs ──────────────────────────────────────────────
+        #  Validate inputs 
         validated_phone = self.validate_phone_number(phone_number)
         if not validated_phone:
             return {"success": False,
@@ -196,7 +223,7 @@ class AuthenticationSystem:
         if not pw_ok:
             return {"success": False, "error": pw_msg}
 
-        # ── Duplicate check ──────────────────────────────────────────────
+        #  Duplicate check 
         conn = self.get_connection()
         c = conn.cursor()
         c.execute(
@@ -208,10 +235,10 @@ class AuthenticationSystem:
             return {"success": False,
                     "error": "An account with this phone, email, or National ID already exists."}
 
-        # ── Hash password ────────────────────────────────────────────────
+        #  Hash password 
         pw_hash, salt = self.hash_password(password)
 
-        # ── Auto-detect gender from National ID (positions 5-7) ──────────
+        #  Auto-detect gender from National ID (positions 5-7) 
         gender = ""
         if len(national_id) == 16:
             seg = national_id[5:8]
@@ -220,7 +247,7 @@ class AuthenticationSystem:
             elif seg == "700":
                 gender = "Female"
 
-        # ── Extract face encoding (if image provided) ────────────────────
+        #  Extract face encoding (if image provided) 
         face_encoding = None
         face_image_path = None
         face_error = None
@@ -280,17 +307,17 @@ class AuthenticationSystem:
 
         verification_status = "verified" if face_encoding else "pending"
 
-        # ── Insert user ──────────────────────────────────────────────────
+        #  Insert user 
         try:
             c.execute('''
                 INSERT INTO users
                 (phone_number, full_name, national_id, email,
                  password_hash, salt, gender,
-                 face_encoding, verification_status)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 face_encoding, face_image_path, verification_status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ''', (validated_phone, full_name, national_id, email,
                   pw_hash, salt, gender,
-                  face_encoding, verification_status))
+                  face_encoding, face_image_path, verification_status))
             conn.commit()
         except psycopg2.IntegrityError:
             conn.close()
@@ -309,9 +336,9 @@ class AuthenticationSystem:
                                 "No face registered. You can add it later in settings.")
         }
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # LOGIN
-    # ─────────────────────────────────────────────────────────────────────
+    # 
 
     def authenticate_user(self, password: str,
                           email: str = None,
@@ -373,6 +400,8 @@ class AuthenticationSystem:
         conn.commit()
         conn.close()
 
+        # Login notification is sent from the frontend via EmailJS (no SMTP needed)
+
         return {
             "success"      : True,
             "session_token": token,
@@ -385,9 +414,9 @@ class AuthenticationSystem:
             }
         }
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # SESSION MANAGEMENT
-    # ─────────────────────────────────────────────────────────────────────
+    # 
 
     def validate_session(self, session_token: str) -> dict | None:
         """
@@ -446,9 +475,9 @@ class AuthenticationSystem:
         conn.commit()
         conn.close()
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # PASSWORD RESET
-    # ─────────────────────────────────────────────────────────────────────
+    # 
 
     def request_password_reset(self, email: str) -> dict:
         """
@@ -478,51 +507,40 @@ class AuthenticationSystem:
         conn.commit()
         conn.close()
 
-        # Send reset email
+        # Use FRONTEND_URL env var for deployed environments; fall back to localhost for dev
+        frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:5173")
+        reset_link = f"{frontend_url}/reset-password?token={token}"
+        html = f"""
+        <div style="font-family:'Times New Roman',Times,serif;max-width:520px;margin:auto;
+                    padding:32px;border:1px solid #e2e8f0;border-radius:12px;background:#fff;">
+          <h2 style="color:#059669;margin-bottom:4px;">MoMo Shield</h2>
+          <p style="color:#64748b;font-size:13px;margin-top:0;">ML-Powered Mobile Money Fraud Detection</p>
+          <hr style="border:none;border-top:1px solid #e2e8f0;margin:16px 0;">
+          <p style="font-size:15px;color:#0f172a;">Hello,</p>
+          <p style="font-size:14px;color:#334155;">
+            We received a request to reset your MoMo Shield password.
+            Click the button below to set a new password:
+          </p>
+          <a href="{reset_link}"
+             style="display:inline-block;margin:20px 0;padding:12px 28px;
+                    background:linear-gradient(to right,#059669,#0284c7);
+                    color:#fff;text-decoration:none;border-radius:8px;
+                    font-weight:bold;font-size:14px;">
+            Reset My Password
+          </a>
+          <p style="color:#64748b;font-size:13px;">
+            This link expires in <strong>1 hour</strong>.
+            If you did not request this, ignore this email - your account is safe.
+          </p>
+          <hr style="border:none;border-top:1px solid #e2e8f0;margin:20px 0;">
+          <p style="color:#94a3b8;font-size:11px;margin:0;">
+            MoMo Shield - Rwanda Mobile Money Protection
+          </p>
+        </div>
+        """
         try:
-            import smtplib
-            from email.mime.text import MIMEText
-            from email.mime.multipart import MIMEMultipart
-
-            SMTP_HOST     = 'smtp.gmail.com'
-            SMTP_PORT     = 587
-            SMTP_USERNAME = 'ruhamorose@gmail.com'
-            SMTP_PASSWORD = 'wagbvbyowxhbwrsg'
-
-            reset_link = f"http://localhost:5173/reset-password?token={token}"
-
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = ' MoMo Shield -- Password Reset Request'
-            msg['From']    = f'MoMo Shield <{SMTP_USERNAME}>'
-            msg['To']      = email
-
-            html = f"""
-            <div style="font-family:Arial,sans-serif;max-width:500px;margin:auto;padding:30px;border:1px solid #e2e8f0;border-radius:12px;">
-              <h2 style="color:#10b981;"> MoMo Shield</h2>
-              <p>Hello,</p>
-              <p>We received a request to reset your password. Click the button below to set a new password:</p>
-              <a href="{reset_link}" style="display:inline-block;margin:20px 0;padding:12px 28px;background:linear-gradient(to right,#10b981,#0ea5e9);color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">
-                Reset My Password
-              </a>
-              <p style="color:#64748b;font-size:13px;">This link expires in <strong>1 hour</strong>. If you did not request this, ignore this email -- your account is safe.</p>
-              <hr style="border:none;border-top:1px solid #e2e8f0;margin:20px 0;">
-              <p style="color:#94a3b8;font-size:11px;">MoMo Shield -- AI-Powered Mobile Money Fraud Detection</p>
-            </div>
-            """
-
-            msg.attach(MIMEText(html, 'html'))
-
-            with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-                server.ehlo()
-                server.starttls()
-                server.login(SMTP_USERNAME, SMTP_PASSWORD)
-                server.sendmail(SMTP_USERNAME, email, msg.as_string())
-
-            print(f"[Auth] Password reset email sent to {email}")
-
+            _send_email(email, "MoMo Shield - Password Reset Request", html)
         except Exception as e:
-            print(f"[Auth] Email send failed: {e}")
-            # Still return success -- token is valid even if email failed
             return {
                 "success": True,
                 "message": "Reset token generated but email delivery failed. Contact support.",
@@ -567,9 +585,9 @@ class AuthenticationSystem:
 
         return {"success": True, "message": "Password reset successfully."}
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # PIN MANAGEMENT
-    # ─────────────────────────────────────────────────────────────────────
+    # 
 
     def set_pin(self, user_id: int, pin: str) -> dict:
         if not pin or not pin.isdigit() or len(pin) < 4:
@@ -714,12 +732,15 @@ class AuthenticationSystem:
                     )
                 }
         except ImportError:
-            print("[Auth] WARNING: face_recognition not installed, skipping face check")
+            return {
+                "success": False,
+                "error": "Face verification is unavailable on this server. Contact support to reset your PIN."
+            }
         return self.set_pin(user_id, new_pin)
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # BALANCE HELPER
-    # ─────────────────────────────────────────────────────────────────────
+    # 
 
     def get_user_balance(self, user_id: int) -> float:
         conn = self.get_connection()

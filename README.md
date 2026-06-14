@@ -1,4 +1,4 @@
-# MoMo Shield — AI-Powered Mobile Money Fraud Detection
+# MoMo Shield — ML-Powered Mobile Money Fraud Detection
 
 A full-stack fraud detection system for Rwanda's mobile money ecosystem (MTN & Airtel), combining an XGBoost ML model, biometric face verification, PIN security, and travel SIM control.
 

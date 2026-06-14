@@ -20,28 +20,28 @@ import webbrowser
 from threading import Thread
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # DISPLAY
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 def banner():
     print("""
-╔══════════════════════════════════════════════════════════════╗
-║          MOMO SHIELD -- Fraud Detection System  v2.0          ║
-║  ML-Powered · Face Verification · Travel Control · Alerts    ║
-╚══════════════════════════════════════════════════════════════╝
+
+          MOMO SHIELD -- Fraud Detection System  v2.0          
+  ML-Powered · Face Verification · Travel Control · Alerts    
+
 """)
 
 def ok(msg):   print(f"  [OK]  {msg}")
 def warn(msg): print(f"  [WARN] {msg}")
 def err(msg):  print(f"  [ERR]  {msg}")
 def info(msg): print(f"  [INFO] {msg}")
-def sep():     print("  " + "─" * 58)
+def sep():     print("  " + "" * 58)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # 1. DEPENDENCY CHECK
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 REQUIRED = {
     # package_name : import_name
@@ -53,14 +53,14 @@ REQUIRED = {
     "joblib"         : "joblib",
     "requests"       : "requests",
     "xgboost"        : "xgboost",
-    "lightgbm"       : "lightgbm",
-    "imbalanced-learn": "imblearn",
 }
 
 OPTIONAL = {
     "face-recognition": "face_recognition",
     "opencv-python"   : "cv2",
     "Pillow"          : "PIL",
+    "lightgbm"        : "lightgbm",
+    "imbalanced-learn": "imblearn",
 }
 
 def check_dependencies() -> bool:
@@ -91,9 +91,9 @@ def check_dependencies() -> bool:
     return True
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # 2. FILE CHECKS
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 REQUIRED_FILES = [
     "app.py",
@@ -147,17 +147,20 @@ def check_files() -> bool:
     return all_ok
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # 3. DATABASE CHECK
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 def check_database() -> bool:
     print("\n  Checking PostgreSQL connection…")
     try:
         import psycopg2
         conn = psycopg2.connect(
-            dbname='momo_fraud', user='postgres',
-            password='Admin@123', host='localhost', port='5432'
+            dbname  = os.environ.get('DB_NAME',     'momo_fraud'),
+            user    = os.environ.get('DB_USER',     'postgres'),
+            password= os.environ.get('DB_PASSWORD', 'Admin@123'),
+            host    = os.environ.get('DB_HOST',     'localhost'),
+            port    = os.environ.get('DB_PORT',     '5432'),
         )
         c = conn.cursor()
         c.execute("SELECT COUNT(*) FROM users")
@@ -170,9 +173,9 @@ def check_database() -> bool:
     return True
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # 4. DATASET CHECK
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 def check_dataset():
     print("\n  Checking training dataset…")
@@ -187,9 +190,9 @@ def check_dataset():
         return False
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # 5. TRAIN MODEL  (called with --train flag)
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 def train_model():
     """
@@ -229,9 +232,9 @@ def train_model():
         return False
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # 6. SERVER LAUNCH
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 def open_browser():
     """Open browser after 3-second delay so Flask has time to bind."""
@@ -276,9 +279,9 @@ def start_server():
         sys.exit(1)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # MAIN
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 def main():
     parser = argparse.ArgumentParser(
@@ -291,7 +294,7 @@ def main():
 
     banner()
 
-    # ── 1. Dependencies ──────────────────────────────────────────────────
+    #  1. Dependencies 
     sep()
     print("  STEP 1 -- Dependency Check")
     sep()
@@ -300,25 +303,25 @@ def main():
         err("Fix missing dependencies before continuing.")
         sys.exit(1)
 
-    # ── 2. Files ─────────────────────────────────────────────────────────
+    #  2. Files 
     sep()
     print("  STEP 2 -- File Check")
     sep()
     check_files()
 
-    # ── 3. Database ───────────────────────────────────────────────────────
+    #  3. Database 
     sep()
     print("  STEP 3 -- Database Check")
     sep()
     check_database()
 
-    # ── 4. Dataset ────────────────────────────────────────────────────────
+    #  4. Dataset 
     sep()
     print("  STEP 4 -- Dataset Check")
     sep()
     dataset_ok = check_dataset()
 
-    # ── 5. Train (optional) ───────────────────────────────────────────────
+    #  5. Train (optional) 
     if args.train:
         if not dataset_ok:
             err("Cannot train without Fraud.csv")
@@ -330,7 +333,7 @@ def main():
         if not train_ok:
             warn("Training failed -- server will run in rule-based mode only")
 
-    # ── Model status summary ──────────────────────────────────────────────
+    #  Model status summary 
     model_loaded = all(os.path.exists(f) for f in MODEL_FILES)
     sep()
     if model_loaded:
@@ -342,20 +345,20 @@ def main():
         info("  2. Run:  python run_system.py --train")
         info("  OR open Momo_Clean.ipynb in Jupyter and run all cells")
 
-    # ── Check only mode ───────────────────────────────────────────────────
+    #  Check only mode 
     if args.check:
         sep()
         ok("Check complete. Server not started (--check mode).")
         return
 
-    # ── 6. Start server ───────────────────────────────────────────────────
+    #  6. Start server 
     sep()
     print("  STEP 6 -- Starting Server")
     sep()
     start_server()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 if __name__ == "__main__":
     try:

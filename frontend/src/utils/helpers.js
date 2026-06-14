@@ -2,9 +2,6 @@ export const fmtRWF = (n) => Number(n || 0).toLocaleString() + ' RWF';
 
 export const fmtDate = (s) => {
   if (!s || s === '—') return '—';
-  // If already pre-formatted string (from backend), return directly
-  if (typeof s === 'string' && s.match(/^\d{2}\/\d{2}\/\d{4}/)) return s;
-  // Otherwise parse as date
   const d = new Date(s);
   if (isNaN(d.getTime())) return '—';
   return d.toLocaleString('en-RW', {
@@ -15,7 +12,7 @@ export const fmtDate = (s) => {
   });
 };
 
-export const showAlert = (setter, msg, type = 'danger') => {
+export const showAlert = (setter, msg, type = 'error') => {
   setter({ show: true, message: msg, type });
   setTimeout(() => setter({ show: false, message: '', type }), 6000);
 };

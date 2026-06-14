@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Shield, Camera, Check, RefreshCw, UserPlus, AlertTriangle, X } from 'lucide-react';
+import { sendLoginNotification } from '../utils/emailService';
 
 const API = '';
 
@@ -127,11 +128,11 @@ export default function Login() {
     const avg = total / (data.length / 4);
 
     if (avg < 30) {
-      setQualityWarn({ show: true, message: '⚠️ Image too dark — move to a brighter area and try again.' });
+      setQualityWarn({ show: true, message: 'Image too dark — move to a brighter area and try again.' });
       return;
     }
     if (avg > 240) {
-      setQualityWarn({ show: true, message: '⚠️ Image too bright — reduce glare or move away from direct light.' });
+      setQualityWarn({ show: true, message: 'Image too bright — reduce glare or move away from direct light.' });
       return;
     }
 
@@ -154,13 +155,17 @@ export default function Login() {
   };
   
   const validateFaceCapture = async (base64Image) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 s timeout
     try {
       const response = await fetch(`${API}/api/validate-face`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ face_base64: base64Image })
+        body: JSON.stringify({ face_base64: base64Image }),
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
       // Parse JSON regardless of HTTP status so we always get the error message
       const result = await response.json();
 
@@ -170,13 +175,17 @@ export default function Login() {
       } else {
         setFaceValid(false);
         const msg = result.error || result.message || 'No face detected. Please ensure your face is clearly visible and try again.';
-        setQualityWarn({ show: true, message: `❌ ${msg}` });
+        setQualityWarn({ show: true, message: `${msg}` });
       }
     } catch (error) {
-      // Only reaches here on a true network failure (server down, CORS, etc.)
-      console.error('Face validation network error:', error);
+      clearTimeout(timeoutId);
+      console.error('Face validation error:', error);
       setFaceValid(false);
-      setQualityWarn({ show: true, message: '❌ Could not reach the server. Make sure the backend is running and try again.' });
+      if (error.name === 'AbortError') {
+        setQualityWarn({ show: true, message: 'Face validation timed out. The server is taking too long — make sure python app.py is running and try again.' });
+      } else {
+        setQualityWarn({ show: true, message: 'Could not reach the server. Make sure python app.py is running on port 5000 and try again.' });
+      }
     } finally {
       setFaceValidating(false);
     }
@@ -209,6 +218,16 @@ export default function Login() {
         localStorage.setItem('user', JSON.stringify(d.user));
         localStorage.setItem('flash_message', 'Logged in successfully!');
         localStorage.setItem('flash_type', 'success');
+
+        // Send login notification — customers only, not admins or managers
+        if (d.dashboard_type === 'user') {
+          sendLoginNotification({
+            name : d.user?.name  || '',
+            email: d.user?.email || loginEmail,
+            phone: d.user?.phone || '',
+          });
+        }
+
         const dashboardUrl = d.dashboard_url || '/user_dashboard';
         navigate(dashboardUrl);
       } else {
@@ -260,7 +279,9 @@ export default function Login() {
           password: regPassword,
           face_base64: faceBase64
         });
-      console.log('Payload size (KB):', Math.round(payload.length / 1024));
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Payload size (KB):', Math.round(payload.length / 1024));
+      }
       const r = await fetch(`${API}/api/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -296,6 +317,7 @@ export default function Login() {
       const d = await r.json();
       if (d.success) {
         setForgotAlert({ show: true, message: 'Reset link sent to your email.', type: 'success' });
+        setForgotEmail('');
       } else {
         setForgotAlert({ show: true, message: d.error || 'Failed to send reset link.', type: 'danger' });
       }
@@ -347,15 +369,15 @@ export default function Login() {
           <h1 className="text-2xl font-bold bg-gradient-to-r from-emerald-500 to-sky-500 bg-clip-text text-transparent">
             MoMo Shield
           </h1>
-          <p className="text-sm text-slate-600 mt-1">AI-Powered Mobile Money Fraud Detection</p>
+          <p className="text-sm font-medium text-slate-600 mt-1">ML-Powered Mobile Money Fraud Detection</p>
         </div>
         
         {/* Login Card */}
         {view === 'login' && (
           <div className="bg-white border-2 border-slate-300 rounded-3xl overflow-hidden shadow-xl animate-in fade-in slide-in-from-bottom-4 duration-300">
             <div className="text-center pt-7 px-8">
-              <h2 className="text-lg font-bold text-slate-900">Sign In</h2>
-              <p className="text-xs text-slate-600 mt-1">Sign in to your MoMo Shield account</p>
+              <h2 className="text-xl font-bold text-slate-900">Sign In</h2>
+              <p className="text-sm text-slate-600 mt-1">Sign in to your MoMo Shield account</p>
             </div>
             <hr className="border-slate-300" />
             <div className="p-7">
@@ -389,12 +411,12 @@ export default function Login() {
                 {loginLoading ? 'Logging in…' : 'Login'}
               </button>
               <div className="mt-4 text-center text-sm text-slate-600 flex flex-col gap-2">
-                <button onClick={() => setView('forgot')} className="text-sky-500 hover:text-emerald-500 bg-transparent border-none cursor-pointer font-sans text-sm">
+                <button onClick={() => setView('forgot')} className="text-sky-500 hover:text-emerald-500 bg-transparent border-none cursor-pointer text-sm">
                   Forgot password?
                 </button>
                 <div>
                   <span>Don't have an account? </span>
-                  <button onClick={() => setView('register')} className="text-emerald-500 font-semibold bg-transparent border-none cursor-pointer font-sans text-sm">
+                  <button onClick={() => setView('register')} className="text-emerald-500 font-semibold bg-transparent border-none cursor-pointer text-sm">
                     Register
                   </button>
                 </div>
@@ -407,8 +429,8 @@ export default function Login() {
         {view === 'register' && (
           <div className="bg-white border-2 border-slate-300 rounded-3xl overflow-hidden shadow-xl animate-in fade-in slide-in-from-bottom-4 duration-300">
             <div className="text-center pt-7 px-8">
-              <h2 className="text-lg font-bold text-slate-900">Create Account</h2>
-              <p className="text-xs text-slate-600 mt-1">Join MoMo Shield for secure transactions</p>
+              <h2 className="text-xl font-bold text-slate-900">Create Account</h2>
+              <p className="text-sm text-slate-600 mt-1">Join MoMo Shield for secure transactions</p>
             </div>
             <hr className="border-slate-300" />
             <div className="p-7 max-h-[80vh] overflow-y-auto">
@@ -456,7 +478,7 @@ export default function Login() {
                     Continue →
                   </button>
                   <div className="text-center mt-6 text-sm text-slate-600">
-                    Already have an account? <button onClick={() => setView('login')} className="text-emerald-500 font-semibold bg-transparent border-none cursor-pointer font-sans text-sm">Login</button>
+                    Already have an account? <button onClick={() => { stopCamera(); setView('login'); }} className="text-emerald-500 font-semibold bg-transparent border-none cursor-pointer text-sm">Login</button>
                   </div>
                 </div>
               )}
@@ -559,19 +581,19 @@ export default function Login() {
                     
                     <div className="flex gap-2 justify-center flex-wrap mt-3">
                       {!stream && !faceCaptured && (
-                        <button onClick={startCamera} className="w-full px-4.5 py-2.5 rounded-[14px] border-none font-sans text-xs font-bold cursor-pointer transition-all inline-flex items-center justify-center gap-1.5 bg-gradient-to-br from-emerald-500 to-sky-500 text-white hover:shadow-lg hover:-translate-y-0.5">
+                        <button onClick={startCamera} className="w-full px-4.5 py-2.5 rounded-[14px] border-none text-xs font-bold cursor-pointer transition-all inline-flex items-center justify-center gap-1.5 bg-gradient-to-br from-emerald-500 to-sky-500 text-white hover:shadow-lg hover:-translate-y-0.5">
                           <Camera className="w-4 h-4" />
                           Open Camera
                         </button>
                       )}
                       {stream && !faceCaptured && (
-                        <button onClick={capturePhoto} className="px-6 py-3 rounded-[14px] border-none font-sans text-sm font-bold cursor-pointer transition-all inline-flex items-center gap-1.5 bg-gradient-to-br from-emerald-500 to-sky-500 text-white hover:shadow-lg hover:-translate-y-0.5">
+                        <button onClick={capturePhoto} className="px-6 py-3 rounded-[14px] border-none text-sm font-bold cursor-pointer transition-all inline-flex items-center gap-1.5 bg-gradient-to-br from-emerald-500 to-sky-500 text-white hover:shadow-lg hover:-translate-y-0.5">
                           <Check className="w-4 h-4" />
                           Capture
                         </button>
                       )}
                       {faceCaptured && (
-                        <button onClick={retakePhoto} className="px-4.5 py-2.5 rounded-[14px] border-none font-sans text-xs font-bold cursor-pointer transition-all inline-flex items-center gap-1.5 bg-transparent text-emerald-500 border border-emerald-500 hover:bg-emerald-50">
+                        <button onClick={retakePhoto} className="px-4.5 py-2.5 rounded-[14px] border-none text-xs font-bold cursor-pointer transition-all inline-flex items-center gap-1.5 bg-transparent text-emerald-500 border border-emerald-500 hover:bg-emerald-50">
                           <RefreshCw className="w-4 h-4" />
                           Retake Photo
                         </button>
@@ -604,8 +626,8 @@ export default function Login() {
         {view === 'forgot' && (
           <div className="bg-white border-2 border-slate-300 rounded-3xl overflow-hidden shadow-xl animate-in fade-in slide-in-from-bottom-4 duration-300">
             <div className="text-center pt-7 px-8">
-              <h2 className="text-lg font-bold text-slate-900">Reset Password</h2>
-              <p className="text-xs text-slate-600 mt-1">Enter your email to receive a reset link</p>
+              <h2 className="text-xl font-bold text-slate-900">Reset Password</h2>
+              <p className="text-sm text-slate-600 mt-1">Enter your email to receive a reset link</p>
             </div>
             <hr className="border-slate-300" />
             <div className="p-7">

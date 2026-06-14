@@ -7,7 +7,9 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'http://localhost:5000',
-        changeOrigin: true
+        changeOrigin: true,
+        timeout: 30000,        // 30 s — face_recognition can take a few seconds
+        proxyTimeout: 30000,
       }
     }
   }

@@ -71,20 +71,25 @@ from fraud_detection import (
     UserRegistrationSystem,
 )
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # APP SETUP
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=[
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+])
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024   # 16 MB
 
 # PostgreSQL Configuration
 DB_CONFIG = {
-    'dbname': 'momo_fraud',
-    'user': 'postgres',
-    'password': 'Admin@123',
-    'host': 'localhost',
-    'port': '5432'
+    'dbname'  : os.environ.get('DB_NAME',     'momo_fraud'),
+    'user'    : os.environ.get('DB_USER',     'postgres'),
+    'password': os.environ.get('DB_PASSWORD', 'Admin@123'),
+    'host'    : os.environ.get('DB_HOST',     'localhost'),
+    'port'    : os.environ.get('DB_PORT',     '5432'),
 }
 
 def get_db_connection():
@@ -100,12 +105,38 @@ pin_monitor     = PinMonitoringSystem(user_reg)
 
 auth_system.cleanup_expired_sessions()
 
-# ── Provider session helpers (DB-backed, survives server restarts) ────────────
+#  Provider session helpers (DB-backed, survives server restarts) 
 
 def _ensure_provider_sessions_table():
-    """Create provider_sessions table if it doesn't exist."""
+    """Create service_providers and provider_sessions tables if they don't exist."""
     conn = get_db_connection()
     c = conn.cursor()
+    # Ensure service_providers table exists (may not exist on a fresh DB)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS service_providers (
+            id         SERIAL PRIMARY KEY,
+            name       TEXT NOT NULL,
+            email      TEXT UNIQUE NOT NULL,
+            phone      TEXT DEFAULT '',
+            national_id TEXT DEFAULT '',
+            sex        TEXT DEFAULT '',
+            password   TEXT NOT NULL,
+            salt       TEXT DEFAULT '',
+            is_active  BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    # Safe migration: add missing columns if table existed without them
+    for col, typedef in [
+        ("phone",       "TEXT DEFAULT ''"),
+        ("national_id", "TEXT DEFAULT ''"),
+        ("sex",         "TEXT DEFAULT ''"),
+        ("salt",        "TEXT DEFAULT ''"),
+    ]:
+        try:
+            c.execute(f"ALTER TABLE service_providers ADD COLUMN IF NOT EXISTS {col} {typedef}")
+        except Exception:
+            pass
     c.execute("""
         CREATE TABLE IF NOT EXISTS provider_sessions (
             token       TEXT PRIMARY KEY,
@@ -228,7 +259,69 @@ def _session_token() -> str | None:
     hdr = request.headers.get("Authorization", "")
     if hdr.startswith("Bearer "):
         return hdr[7:]
+    # Also accept from JSON body or query string (for GET requests from the frontend)
+    try:
+        body = request.get_json(silent=True) or {}
+        if body.get("session_token"):
+            return body["session_token"]
+    except Exception:
+        pass
+    qs = request.args.get("session_token")
+    if qs:
+        return qs
+    # Fall back to localStorage token passed as X-Session-Token header
+    xst = request.headers.get("X-Session-Token")
+    if xst:
+        return xst
     return None
+
+
+def _admin_token() -> str | None:
+    """Extract admin session token — checks Authorization header, then localStorage cookie-style header."""
+    return _session_token()
+
+
+def _require_admin(token: str) -> tuple | None:
+    """
+    Validate that the token belongs to an admin user.
+    Returns None if OK, or an error response tuple if not authorized.
+    """
+    if not token:
+        return _err("Authentication required.", 401)
+    # Check provider session first (providers are NOT admins)
+    provider = _provider_session_get(token)
+    if provider:
+        return _err("Admin access required.", 403)
+    user = auth_system.validate_session(token)
+    if not user:
+        return _err("Session expired or invalid.", 401)
+    role = user.get("role", "user")
+    email = user.get("email", "")
+    if role != "admin":
+        return _err("Admin access required.", 403)
+    return None
+
+
+def _require_provider_or_admin(token: str) -> tuple | None:
+    """
+    Allow both admin users and provider/manager sessions.
+    Returns None if OK, or an error response tuple if not authorized.
+    """
+    if not token:
+        return _err("Authentication required.", 401)
+    # Accept provider sessions
+    provider = _provider_session_get(token)
+    if provider:
+        return None
+    # Accept admin / provider-role user sessions
+    user = auth_system.validate_session(token)
+    if not user:
+        return _err("Session expired or invalid.", 401)
+    role = user.get("role", "user")
+    email = user.get("email", "")
+    if role in ("admin", "provider"):
+        return None
+    return _err("Access restricted to managers and administrators.", 403)
 
 
 def _ok(data: dict, code: int = 200):
@@ -241,9 +334,9 @@ def _err(msg: str, code: int = 400):
     return jsonify({"success": False, "error": msg}), code
 
 
-def _hash_pin(pin: str) -> str:
-    """SHA-256 hash of PIN."""
-    return hashlib.sha256(pin.encode()).hexdigest()
+def _hash_pin(pin: str, salt: str = "") -> str:
+    """SHA-256 hash of PIN with optional salt."""
+    return hashlib.sha256((pin + salt).encode()).hexdigest()
 
 
 def _table_exists(conn, table: str) -> bool:
@@ -306,18 +399,18 @@ def _reactivate_non_travel_users():
 
 _reactivate_non_travel_users()
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # PAGE ROUTES
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 @app.route("/")
 def index():
     return _ok({"message": "MoMo Shield API v2.0 -- use /api/* endpoints"})
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # AUTH ROUTES
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 @app.route("/api/register", methods=["POST"])
 def register():
@@ -355,11 +448,13 @@ def register():
             }
 
         if result["success"] and pin and len(pin) >= 4:
+            import secrets as _secrets
+            pin_salt = _secrets.token_hex(8)
             conn = psycopg2.connect(**DB_CONFIG)
             cr = conn.cursor()
             cr.execute(
-                "UPDATE users SET pin_hash=%s, pin_blocked=FALSE, pin_fail_count=0 WHERE phone_number=%s",
-                (_hash_pin(pin), phone)
+                "UPDATE users SET pin_hash=%s, pin_salt=%s, pin_blocked=FALSE, pin_fail_count=0 WHERE phone_number=%s",
+                (_hash_pin(pin, pin_salt), pin_salt, phone)
             )
             conn.commit()
             conn.close()
@@ -412,13 +507,29 @@ def login():
         hashed = hashlib.sha256(password.encode()).hexdigest()
         conn = psycopg2.connect(**DB_CONFIG)
         c = conn.cursor()
-        c.execute("SELECT id, name, email FROM service_providers WHERE email=%s AND password=%s AND is_active=TRUE", (email, hashed))
+        c.execute("SELECT id, name, email, salt FROM service_providers WHERE email=%s AND is_active=TRUE", (email,))
         provider = c.fetchone()
         conn.close()
 
         if provider:
-            token = _provider_session_create(provider[0], provider[1], provider[2])
-            _log_access("LOGIN", provider[2], provider[1], "provider", "SUCCESS")
+            pid, pname, pemail, psalt = provider
+            # Support both salted (new) and legacy unsalted hashes
+            if psalt:
+                pw_match = hashlib.sha256((password + psalt).encode()).hexdigest()
+            else:
+                pw_match = hashlib.sha256(password.encode()).hexdigest()
+            # Fetch stored hash to compare
+            conn2 = psycopg2.connect(**DB_CONFIG)
+            c2 = conn2.cursor()
+            c2.execute("SELECT password FROM service_providers WHERE id=%s", (pid,))
+            stored_hash = c2.fetchone()[0]
+            conn2.close()
+            if pw_match != stored_hash:
+                provider = None
+
+        if provider:
+            token = _provider_session_create(pid, pname, pemail)
+            _log_access("LOGIN", pemail, pname, "provider", "SUCCESS")
             return _ok({
                 "success"       : True,
                 "session_token" : token,
@@ -586,7 +697,7 @@ def update_face():
         phone_in    = data.get("phone_number", "").strip()
         national_id = data.get("national_id", "").strip()
 
-        # ── Session required ──────────────────────────────────────────────
+        #  Session required 
         user = auth_system.validate_session(token)
         if not user:
             return _err("Invalid or expired session.", 401)
@@ -598,16 +709,16 @@ def update_face():
         if not national_id:
             return _err("national_id is required.")
 
-        # ── Normalise phone ───────────────────────────────────────────────
+        #  Normalise phone 
         validated_phone = auth_system.validate_phone_number(phone_in)
         if not validated_phone:
             return _err("Invalid phone number format.")
 
-        # ── Phone must belong to the session user ─────────────────────────
+        #  Phone must belong to the session user 
         if validated_phone != user["phone"]:
             return _err("Phone number does not match your account.")
 
-        # ── Verify national_id matches DB record ──────────────────────────
+        #  Verify national_id matches DB record 
         conn = psycopg2.connect(**DB_CONFIG)
         cuf = conn.cursor()
         cuf.execute(
@@ -625,7 +736,7 @@ def update_face():
         if str(stored_national_id).strip() != str(national_id).strip():
             return _err("National ID does not match our records.")
 
-        # ── If a face already exists, new face must be similar (same person) ──
+        #  If a face already exists, new face must be similar (same person) 
         if stored_face_enc:
             similarity_check = user_reg.verify_face_from_base64(validated_phone, face_b64, tolerance=0.60)
             if not similarity_check.get("verified"):
@@ -659,7 +770,7 @@ def update_face():
                 )
                 return _err(err_msg or "Face verification failed.")
 
-        # ── Run the update -- overwrites existing DB encoding + folder image ──
+        #  Run the update -- overwrites existing DB encoding + folder image 
         result = user_reg.update_face_encoding(validated_phone, face_b64, overwrite=True)
         return _ok(result) if result["success"] else _err(result["error"])
 
@@ -667,9 +778,9 @@ def update_face():
         return _err(f"Face update failed: {e}", 500)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # PIN ROUTES
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 @app.route("/api/set-pin", methods=["POST"])
 def set_pin():
@@ -691,11 +802,13 @@ def set_pin():
         if not user:
             return _err("Invalid session.", 401)
 
+        import secrets as _secrets
+        pin_salt = _secrets.token_hex(8)
         conn = psycopg2.connect(**DB_CONFIG)
         cs = conn.cursor()
         cs.execute(
-            "UPDATE users SET pin_hash=%s, pin_blocked=FALSE, pin_fail_count=0 WHERE phone_number=%s",
-            (_hash_pin(pin), user["phone"])
+            "UPDATE users SET pin_hash=%s, pin_salt=%s, pin_blocked=FALSE, pin_fail_count=0 WHERE phone_number=%s",
+            (_hash_pin(pin, pin_salt), pin_salt, user["phone"])
         )
         conn.commit()
         conn.close()
@@ -730,7 +843,7 @@ def verify_pin():
         conn = psycopg2.connect(**DB_CONFIG)
         cp = conn.cursor()
         cp.execute(
-            "SELECT pin_hash, pin_blocked, pin_fail_count FROM users WHERE phone_number=%s",
+            "SELECT pin_hash, pin_salt, pin_blocked, pin_fail_count FROM users WHERE phone_number=%s",
             (user["phone"],)
         )
         row = cp.fetchone()
@@ -739,7 +852,7 @@ def verify_pin():
             conn.close()
             return _err("No PIN set. Please set your PIN first.")
 
-        pin_hash, pin_blocked, fail_count = row
+        pin_hash, pin_salt, pin_blocked, fail_count = row[0], row[1] or "", row[2], row[3]
 
         # Already blocked
         if pin_blocked:
@@ -748,7 +861,7 @@ def verify_pin():
                         "error": "PIN is blocked. Go to Reset PIN to unblock."})
 
         # Check PIN
-        if _hash_pin(pin) == pin_hash:
+        if _hash_pin(pin, pin_salt) == pin_hash:
             # Correct -- reset fail count
             cp.execute(
                 "UPDATE users SET pin_fail_count=0 WHERE phone_number=%s",
@@ -920,11 +1033,13 @@ def reset_pin():
             return _err(f"Face verification failed: {face_match['reason']}")
 
         # Step 3: Set new PIN, unblock
+        import secrets as _secrets
+        pin_salt = _secrets.token_hex(8)
         conn = psycopg2.connect(**DB_CONFIG)
         crp2 = conn.cursor()
         crp2.execute(
-            "UPDATE users SET pin_hash=%s, pin_blocked=FALSE, pin_fail_count=0 WHERE phone_number=%s",
-            (_hash_pin(new_pin), user["phone"])
+            "UPDATE users SET pin_hash=%s, pin_salt=%s, pin_blocked=FALSE, pin_fail_count=0 WHERE phone_number=%s",
+            (_hash_pin(new_pin, pin_salt), pin_salt, user["phone"])
         )
         conn.commit()
         conn.close()
@@ -946,7 +1061,7 @@ def _verify_face(face_b64: str, stored_encoding_bytes: bytes) -> dict:
         import io as _io
         from PIL import Image as _PILImg
 
-        # ── Step 1: Decode and detect live face ──────────────────────────
+        #  Step 1: Decode and detect live face 
         img_bytes = base64.b64decode(face_b64)
         img       = _PILImg.open(_io.BytesIO(img_bytes)).convert("RGB")
 
@@ -983,7 +1098,7 @@ def _verify_face(face_b64: str, stored_encoding_bytes: bytes) -> dict:
             return {"match": False, "reason": "Could not generate face encoding. Try again with better lighting."}
         live_enc = live_encs[0]
 
-        # ── Step 2: Decode stored encoding ───────────────────────────────
+        #  Step 2: Decode stored encoding 
         stored_bytes = bytes(stored_encoding_bytes)
         if len(stored_bytes) == 1024:
             stored_enc = np.frombuffer(stored_bytes, dtype=np.float64)
@@ -1003,7 +1118,7 @@ def _verify_face(face_b64: str, stored_encoding_bytes: bytes) -> dict:
         if len(stored_enc) != 128:
             return {"match": False, "reason": "Stored face encoding is corrupted. Contact support."}
 
-        # ── Step 3: Compare ───────────────────────────────────────────────
+        #  Step 3: Compare 
         distance = face_recognition.face_distance([stored_enc], live_enc)[0]
         if distance <= 0.55:
             return {"match": True, "reason": f"Face matched (distance: {distance:.3f})"}
@@ -1035,9 +1150,9 @@ def _verify_face(face_b64: str, stored_encoding_bytes: bytes) -> dict:
         return {"match": False, "reason": f"Verification error: {e}"}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # TRANSFER ROUTES
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 @app.route("/api/transfer", methods=["POST"])
 def transfer():
@@ -1073,11 +1188,9 @@ def transfer():
 
 @app.route("/api/explain-transaction", methods=["POST"])
 def explain_transaction():
-    """
-    Standard explanation: Rule-based + Feature Importance.
-    Fast, always works. Used by manager fraud alerts.
-    Accepts: { phone_number, amount, network }
-    """
+    """Standard explanation: Rule-based + Feature Importance. Used by manager fraud alerts."""
+    auth_err = _require_provider_or_admin(_admin_token())
+    if auth_err: return auth_err
     try:
         data    = request.get_json() or {}
         phone   = data.get("phone_number", "").strip()
@@ -1093,11 +1206,9 @@ def explain_transaction():
 
 @app.route("/api/explain-transaction/deep", methods=["POST"])
 def explain_transaction_deep():
-    """
-    Deep explanation: Rule-based + Feature Importance + SHAP.
-    Slower. Admin-only for fraud pattern analysis.
-    Accepts: { phone_number, amount, network }
-    """
+    """Deep explanation: Rule-based + Feature Importance + SHAP. Admin only."""
+    auth_err = _require_admin(_admin_token())
+    if auth_err: return auth_err
     try:
         data    = request.get_json() or {}
         phone   = data.get("phone_number", "").strip()
@@ -1174,6 +1285,7 @@ def check_recipient():
                 WHERE user_phone=%s
                   AND departure_date::date <= %s::date
                   AND return_date::date    >= %s::date
+                  AND sim_deactivated = TRUE
                 ORDER BY id DESC LIMIT 1
             """, (phone, today, today))
             travel = c.fetchone()
@@ -1191,9 +1303,9 @@ def check_recipient():
         return _err(f"Recipient lookup failed: {e}", 500)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # TRAVEL ROUTES
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 @app.route("/api/travel/register", methods=["POST"])
 def register_travel():
@@ -1234,6 +1346,8 @@ def travel_status(phone):
 @app.route("/api/admin/travel/status", methods=["POST", "GET"])
 def admin_travel_status():
     """POST alias used by the manager dashboard -- accepts phone_number in body."""
+    auth_err = _require_provider_or_admin(_admin_token())
+    if auth_err: return auth_err
     try:
         data  = request.get_json() or {}
         phone = data.get("phone_number", "").strip()
@@ -1254,6 +1368,8 @@ def admin_travel_status():
 @app.route("/api/admin/travel/register", methods=["POST"])
 def admin_register_travel():
     """Admin/manager alias for travel registration."""
+    auth_err = _require_provider_or_admin(_admin_token())
+    if auth_err: return auth_err
     try:
         data = request.get_json() or {}
         phone = data.get("phone_number", "").strip()
@@ -1271,6 +1387,8 @@ def admin_register_travel():
 @app.route("/api/admin/travel/reactivate", methods=["POST"])
 def admin_reactivate_sim():
     """Admin/manager alias for SIM reactivation."""
+    auth_err = _require_provider_or_admin(_admin_token())
+    if auth_err: return auth_err
     try:
         data  = request.get_json() or {}
         phone = data.get("phone_number", "").strip()
@@ -1282,12 +1400,16 @@ def admin_reactivate_sim():
         return _err(f"Reactivation failed: {e}", 500)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # ADMIN / DASHBOARD ROUTES
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
-@app.route("/api/dashboard/stats", methods=["GET"])
-def dashboard_stats():
+@app.route("/api/public/stats", methods=["GET"])
+def public_stats():
+    """
+    Minimal public-facing stats for the homepage.
+    Only exposes aggregate counts — no fraud details.
+    """
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         c    = conn.cursor()
@@ -1297,12 +1419,38 @@ def dashboard_stats():
             return c.fetchone()[0]
 
         stats = {
-            "total_users"            : q("SELECT COUNT(*) FROM users WHERE email NOT LIKE '%@admin.com'"),
-            "active_users"           : q("SELECT COUNT(*) FROM users WHERE is_active=TRUE"),
+            "total_users"    : q("SELECT COUNT(*) FROM users WHERE role='user' AND email NOT LIKE '%@admin.com' AND email NOT LIKE '%@provider.com'"),
+            "transfers_today": q("SELECT COUNT(*) FROM money_transfers WHERE created_at::date=CURRENT_DATE"),
+            "fraud_blocked_7d": q("SELECT COUNT(*) FROM money_transfers WHERE is_fraud=TRUE AND created_at>=NOW()-INTERVAL '7 days'"),
+            "transfers_7d"   : q("SELECT COUNT(*) FROM money_transfers WHERE created_at>=NOW()-INTERVAL '7 days'"),
+        }
+        t7 = stats["transfers_7d"] or 1
+        stats["fraud_rate_7d"] = round(stats["fraud_blocked_7d"] / t7 * 100, 2)
+        conn.close()
+        return _ok({"success": True, "stats": stats})
+    except Exception as e:
+        return _err(f"Stats failed: {e}", 500)
+
+
+@app.route("/api/dashboard/stats", methods=["GET"])
+def dashboard_stats():
+    auth_err = _require_provider_or_admin(_admin_token())
+    if auth_err: return auth_err
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        c    = conn.cursor()
+
+        def q(sql):
+            c.execute(sql)
+            return c.fetchone()[0]
+
+        stats = {
+            "total_users"            : q("SELECT COUNT(*) FROM users WHERE role='user' AND email NOT LIKE '%@admin.com' AND email NOT LIKE '%@provider.com'"),
+            "active_users"           : q("SELECT COUNT(*) FROM users WHERE role='user' AND is_active=TRUE AND email NOT LIKE '%@admin.com' AND email NOT LIKE '%@provider.com'"),
             "active_providers"       : q("SELECT COUNT(*) FROM service_providers WHERE is_active=TRUE"),
             "users_abroad"           : q(
                 "SELECT COUNT(*) FROM travel_records "
-                "WHERE departure_date<=NOW() AND return_date>=NOW()"),
+                "WHERE sim_deactivated=TRUE AND return_date >= NOW()"),
             "transfers_today"        : q(
                 "SELECT COUNT(*) FROM money_transfers "
                 "WHERE created_at::date=CURRENT_DATE"),
@@ -1334,6 +1482,8 @@ def dashboard_stats():
 
 @app.route("/api/fraud/alerts", methods=["GET"])
 def fraud_alerts():
+    auth_err = _require_provider_or_admin(_admin_token())
+    if auth_err: return auth_err
     try:
         alerts = fraud_detector.get_fraud_alerts()
         return _ok({"success": True, "alerts": alerts})
@@ -1343,6 +1493,8 @@ def fraud_alerts():
 
 @app.route("/api/fraud/alerts/acknowledge", methods=["POST"])
 def acknowledge_alert():
+    auth_err = _require_provider_or_admin(_admin_token())
+    if auth_err: return auth_err
     try:
         data     = request.get_json() or {}
         alert_id = data.get("alert_id")
@@ -1377,12 +1529,14 @@ def pin_status(phone):
         return _err(f"PIN status failed: {e}", 500)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # ADMIN USER MANAGEMENT ROUTES
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 @app.route("/api/admin/user-lookup", methods=["POST"])
 def admin_user_lookup():
+    auth_err = _require_provider_or_admin(_admin_token())
+    if auth_err: return auth_err
     try:
         data  = request.get_json() or {}
         phone = data.get("phone_number", "").strip()
@@ -1427,7 +1581,8 @@ def admin_user_lookup():
             all_rows = sorted(list(sent_rows) + list(recv_rows), key=lambda x: x[5] or "", reverse=True)
             user["transactions"] = [{
                 "sender_phone": r[0], "recipient_phone": r[1], "amount": r[2],
-                "fee": r[3], "status": r[4], "created_at": r[5],
+                "fee": r[3], "status": r[4],
+                "created_at": r[5].isoformat() if r[5] else None,
                 "fraud_score": r[6], "risk_level": r[7], "is_fraud": bool(r[8]),
                 "notes": r[9], "direction": r[10]
             } for r in all_rows[:20]]
@@ -1441,7 +1596,8 @@ def admin_user_lookup():
                     "FROM fraud_alerts WHERE phone_number=%s "
                     "ORDER BY created_at DESC LIMIT 10", (phone,))
                 user["alerts"] = [{"message": r[0], "fraud_score": r[1],
-                                   "risk_level": r[2], "action": r[3], "created_at": r[4]}
+                                   "risk_level": r[2], "action": r[3],
+                                   "created_at": r[4].isoformat() if r[4] else None}
                                   for r in c.fetchall()]
             except Exception:
                 user["alerts"] = []
@@ -1455,6 +1611,8 @@ def admin_user_lookup():
 @app.route("/api/admin/users", methods=["GET"])
 @app.route("/api/admin/all-users", methods=["GET"])
 def admin_all_users():
+    auth_err = _require_provider_or_admin(_admin_token())
+    if auth_err: return auth_err
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         c    = conn.cursor()
@@ -1472,12 +1630,14 @@ def admin_all_users():
         return _err(f"Failed to fetch users: {e}", 500)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # ADMIN PROVIDER MANAGEMENT ROUTES
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 @app.route("/api/admin/providers", methods=["GET"])
 def admin_get_providers():
+    auth_err = _require_admin(_admin_token())
+    if auth_err: return auth_err
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         c = conn.cursor()
@@ -1498,6 +1658,8 @@ def admin_get_providers():
 
 @app.route("/api/admin/add-provider", methods=["POST"])
 def admin_add_provider():
+    auth_err = _require_admin(_admin_token())
+    if auth_err: return auth_err
     try:
         data = request.get_json() or {}
         name = data.get("name", "").strip()
@@ -1519,12 +1681,14 @@ def admin_add_provider():
             conn.close()
             return _err("Email already exists.")
         
-        hashed_password = hashlib.sha256(password.encode()).hexdigest()
+        import secrets as _secrets
+        provider_salt     = _secrets.token_hex(8)
+        hashed_password   = hashlib.sha256((password + provider_salt).encode()).hexdigest()
         
         c.execute(
-            "INSERT INTO service_providers (name, email, phone, national_id, sex, password, is_active, created_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())",
-            (name, email, phone, national_id, sex, hashed_password, bool(int(status)))
+            "INSERT INTO service_providers (name, email, phone, national_id, sex, password, salt, is_active, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())",
+            (name, email, phone, national_id, sex, hashed_password, provider_salt, bool(int(status)))
         )
         
         conn.commit()
@@ -1540,6 +1704,8 @@ def admin_add_provider():
 
 @app.route("/api/admin/toggle-provider", methods=["POST"])
 def admin_toggle_provider():
+    auth_err = _require_admin(_admin_token())
+    if auth_err: return auth_err
     try:
         data = request.get_json() or {}
         provider_id = data.get("provider_id")
@@ -1572,6 +1738,8 @@ def admin_toggle_provider():
 
 @app.route("/api/admin/update-provider", methods=["POST"])
 def admin_update_provider():
+    auth_err = _require_admin(_admin_token())
+    if auth_err: return auth_err
     try:
         data = request.get_json() or {}
         provider_id = data.get("provider_id")
@@ -1600,10 +1768,12 @@ def admin_update_provider():
             return _err("Email is already used by another provider.")
         
         if password:
-            hashed_password = hashlib.sha256(password.encode()).hexdigest()
+            import secrets as _secrets
+            provider_salt   = _secrets.token_hex(8)
+            hashed_password = hashlib.sha256((password + provider_salt).encode()).hexdigest()
             c.execute(
-                "UPDATE service_providers SET name=%s, email=%s, phone=%s, national_id=%s, sex=%s, password=%s, is_active=%s WHERE id=%s",
-                (name, email, phone, national_id, sex, hashed_password, bool(int(status)), provider_id)
+                "UPDATE service_providers SET name=%s, email=%s, phone=%s, national_id=%s, sex=%s, password=%s, salt=%s, is_active=%s WHERE id=%s",
+                (name, email, phone, national_id, sex, hashed_password, provider_salt, bool(int(status)), provider_id)
             )
         else:
             c.execute(
@@ -1624,6 +1794,8 @@ def admin_update_provider():
 
 @app.route("/api/admin/delete-provider", methods=["POST"])
 def admin_delete_provider():
+    auth_err = _require_admin(_admin_token())
+    if auth_err: return auth_err
     try:
         data = request.get_json() or {}
         provider_id = data.get("provider_id")
@@ -1650,14 +1822,14 @@ def admin_delete_provider():
         return _err(f"Failed to delete provider: {e}", 500)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # ADMIN USER MANAGEMENT ROUTES (EXTENDED)
-from datetime import timezone, timedelta
-
-EAT = timedelta(hours=3)
+#
 
 @app.route("/api/admin/access-logs", methods=["GET"])
 def admin_get_access_logs():
+    auth_err = _require_admin(_admin_token())
+    if auth_err: return auth_err
     try:
         limit = min(int(request.args.get("limit", 100)), 500)
         conn = get_db_connection()
@@ -1690,10 +1862,12 @@ def admin_get_access_logs():
         return _err(f"Failed to fetch access logs: {e}", 500)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 @app.route("/api/admin/fraud-alerts", methods=["GET"])
 def admin_get_fraud_alerts():
+    auth_err = _require_admin(_admin_token())
+    if auth_err: return auth_err
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         c = conn.cursor()
@@ -1723,17 +1897,18 @@ def admin_get_fraud_alerts():
 
         alerts = [
             {
-                "id"          : row[0],
-                "phone_number": row[1],
-                "amount"      : row[2],
-                "fraud_score" : row[3],
-                "risk_level"  : row[4],
-                "action"      : row[5],
-                "message"     : row[6],
-                "acknowledged": bool(row[7]),
-                "created_at"  : row[8],
-                "user_name"   : row[9] or "Unknown",
-                "explanation" : row[10],   # stored at alert-creation time
+                "id"           : row[0],
+                "phone_number" : row[1],
+                "amount"       : row[2] or 0,
+                "fraud_score"  : row[3],
+                "risk_level"   : row[4],
+                "action"       : row[5],
+                "message"      : row[6],
+                "alert_message": row[6],   # alias for frontend compatibility
+                "acknowledged" : bool(row[7]),
+                "created_at"   : row[8].isoformat() if row[8] else None,
+                "user_name"    : row[9] or "Unknown",
+                "explanation"  : row[10] if isinstance(row[10], dict) else (json.loads(row[10]) if row[10] else None),
             }
             for row in c.fetchall()
         ]
@@ -1749,6 +1924,8 @@ def admin_get_fraud_alerts():
 
 @app.route("/api/admin/update-user-multi", methods=["POST"])
 def admin_update_user_multi():
+    auth_err = _require_admin(_admin_token())
+    if auth_err: return auth_err
     try:
         data = request.get_json() or {}
         phone = data.get("phone_number", "").strip()
@@ -1812,6 +1989,8 @@ def admin_update_user_multi():
 
 @app.route("/api/admin/update-user", methods=["POST"])
 def admin_update_user():
+    auth_err = _require_admin(_admin_token())
+    if auth_err: return auth_err
     try:
         data = request.get_json() or {}
         phone = data.get("phone_number", "").strip()
@@ -1852,6 +2031,8 @@ def admin_update_user():
 
 @app.route("/api/admin/delete-user", methods=["POST"])
 def admin_delete_user():
+    auth_err = _require_admin(_admin_token())
+    if auth_err: return auth_err
     try:
         data  = request.get_json() or {}
         phone = data.get("phone_number", "").strip()
@@ -1907,16 +2088,15 @@ def admin_delete_user():
         return _err(f"Failed to delete user: {e}", 500)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # ADMIN SYSTEM MANAGEMENT ROUTES
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 @app.route("/api/admin/backup", methods=["POST"])
 def admin_create_backup():
-    """
-    Runs pg_dump and streams the result directly as a downloadable .sql file.
-    No temp file left on disk.
-    """
+    """Runs pg_dump and streams the result directly as a downloadable .sql file. No temp file left on disk."""
+    auth_err = _require_admin(_admin_token())
+    if auth_err: return auth_err
     try:
         import subprocess
         from flask import Response
@@ -1966,6 +2146,8 @@ def admin_settings():
     GET  -> return current settings from fraud_config.json + DB
     POST -> persist settings to fraud_config.json and update live fraud threshold
     """
+    auth_err = _require_admin(_admin_token())
+    if auth_err: return auth_err
     try:
         if request.method == "GET":
             conn = psycopg2.connect(**DB_CONFIG)
@@ -2043,9 +2225,9 @@ def admin_settings():
         return _err(f"Settings operation failed: {e}", 500)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # SYSTEM
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 @app.route("/api/health", methods=["GET"])
 def health():
@@ -2072,7 +2254,7 @@ def server_error(e):
     return _err("Internal server error.", 500)
 
 
-# ── User convenience aliases (frontend uses /api/user/* prefix) ──────────────
+#  User convenience aliases (frontend uses /api/user/* prefix) 
 
 @app.route("/api/user/balance", methods=["POST"])
 def user_balance():
@@ -2168,16 +2350,31 @@ def user_profile():
         conn = psycopg2.connect(**DB_CONFIG)
         c = conn.cursor()
         c.execute(
-            "SELECT full_name, email, phone_number, national_id, account_balance, gender FROM users WHERE phone_number=%s",
+            "SELECT full_name, email, phone_number, national_id, account_balance, gender, is_active FROM users WHERE phone_number=%s",
             (user["phone"],)
         )
         row = c.fetchone()
-        conn.close()
         if not row:
+            conn.close()
             return _err("User not found.")
-        return _ok({"success": True, "user": {   # <- key must be "user" not "profile"
+        # Check if user is abroad (sim deactivated)
+        today = datetime.now().date().isoformat()
+        c.execute(
+            "SELECT destination_country, return_date FROM travel_records "
+            "WHERE user_phone=%s AND sim_deactivated=TRUE AND return_date >= %s "
+            "ORDER BY id DESC LIMIT 1",
+            (user["phone"], today)
+        )
+        travel = c.fetchone()
+        conn.close()
+        status = "abroad" if travel else ("active" if row[6] else "inactive")
+        return _ok({"success": True, "user": {
             "name": row[0], "email": row[1], "phone": row[2],
-            "national_id": row[3], "balance": row[4], "sex": row[5]
+            "national_id": row[3], "balance": row[4], "sex": row[5],
+            "is_active": bool(row[6]),
+            "status": status,
+            "travel_destination": travel[0] if travel else None,
+            "travel_return": str(travel[1]) if travel else None,
         }})
     except Exception as e:
         return _err(f"Profile fetch failed: {e}", 500)
@@ -2204,6 +2401,8 @@ def user_update_face():
 
 @app.route('/api/admin/user-transactions', methods=['POST'])
 def admin_user_transactions():
+    auth_err = _require_provider_or_admin(_admin_token())
+    if auth_err: return auth_err
     data = request.get_json() or {}
     phone_number = data.get('phone_number', '').strip()
     if not phone_number:
@@ -2260,6 +2459,8 @@ def admin_user_transactions():
 
 @app.route('/api/admin/user-fraud-alerts', methods=['POST'])
 def admin_user_fraud_alerts():
+    auth_err = _require_provider_or_admin(_admin_token())
+    if auth_err: return auth_err
     data = request.get_json() or {}
     phone_number = data.get('phone_number', '').strip()
     if not phone_number:
@@ -2287,9 +2488,9 @@ def admin_user_fraud_alerts():
         return jsonify({'success': False, 'error': str(e)}), 500     
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # ENTRY POINT
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 if __name__ == "__main__":
     print("=" * 60)

@@ -20,11 +20,204 @@
 html { scroll-behavior: smooth; }
 
 body {
-  font-family: 'Sora', ui-sans-serif, system-ui, sans-serif;
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 14px;          /* 14pt base — all body text */
+  line-height: 1.6;
   background: var(--bg);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Typography scale ── */
+@layer base {
+
+  /* Page headings — bold, 14pt+ */
+  h1 {
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 1.5rem;      /* 24px / 18pt */
+    font-weight: 700;
+    line-height: 1.25;
+    color: #0f172a;
+  }
+
+  h2 {
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 1.25rem;     /* 20px / 15pt */
+    font-weight: 700;
+    line-height: 1.3;
+    color: #0f172a;
+  }
+
+  h3 {
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 1rem;        /* 16px / 12pt */
+    font-weight: 700;
+    line-height: 1.4;
+    color: #0f172a;
+  }
+
+  /* Standard body text — 14pt */
+  p, li, td, dd, blockquote {
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 0.875rem;    /* 14px / 10.5pt — matches design's text-sm */
+    font-weight: 400;
+    color: #334155;
+  }
+
+  /* Labels — 12pt, bold */
+  label {
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 0.75rem;     /* 12px */
+    font-weight: 700;
+    color: #475569;
+  }
+
+  /* Table headers — 12pt, bold, uppercase */
+  th {
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 0.75rem;     /* 12px */
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: #475569;
+  }
+
+  /* Table data — 14pt */
+  td {
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 0.875rem;    /* 14px */
+  }
+
+  /* Inputs & selects — 14pt */
+  input, select, textarea {
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 0.875rem;    /* 14px */
+  }
+
+  /* Buttons — 12pt bold (compact UI) */
+  button {
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 0.75rem;     /* 12px */
+    font-weight: 600;
+  }
+
+  /* Nav links */
+  a {
+    font-family: 'Times New Roman', Times, serif;
+  }
+}
+
+/* ── Dashboard-specific typography ── */
+@layer components {
+
+  /* Sidebar nav items — 14pt */
+  .nav-item {
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+
+  /* Card section headings — 14pt bold */
+  .card-title {
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: #0f172a;
+  }
+
+  /* Stat card values — 24pt bold */
+  .stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+  }
+
+  /* Stat card labels — 12pt */
+  .stat-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #475569;
+  }
+
+  /* Badge text — 11pt */
+  .badge-text {
+    font-size: 0.6875rem;
+    font-weight: 700;
+  }
+
+  /* Alert / toast messages — 14pt */
+  .alert-text {
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+
+  /* Helper / muted text — 12pt */
+  .helper-text {
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: #64748b;
+  }
+
+  /* Modal title — 14pt bold */
+  .modal-title {
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: #0f172a;
+  }
+
+  /* Table cell text — 14pt */
+  .table-cell {
+    font-size: 0.875rem;
+  }
+
+  /* Sidebar section header — 12pt */
+  .sidebar-section {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #94a3b8;
+  }
+
+  /* Form field label — 12pt bold uppercase */
+  .form-label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #475569;
+  }
+}
+
+/* ── Tailwind text-size overrides for Times New Roman consistency ── */
+/* These ensure Tailwind utility classes render at the correct pt sizes */
+
+.text-\[10px\]  { font-size: 0.625rem;  } /* ~8pt  — badges, tiny labels */
+.text-xs        { font-size: 0.75rem;   } /* 12pt  — labels, badges, meta */
+.text-sm        { font-size: 0.875rem;  } /* 14pt  — body text, nav items */
+.text-base      { font-size: 1rem;      } /* 16pt  — card titles */
+.text-lg        { font-size: 1.125rem;  } /* 18pt  — section headings */
+.text-xl        { font-size: 1.25rem;   } /* 20pt  — page headings */
+.text-2xl       { font-size: 1.5rem;    } /* 24pt  — dashboard titles, stat values */
+.text-3xl       { font-size: 1.875rem;  } /* 30pt  — hero section */
+.text-4xl       { font-size: 2.25rem;   } /* 36pt  — hero h1 */
+.text-5xl       { font-size: 3rem;      } /* 48pt  — hero h1 large */
+
+/* Bold utility — ensures Times New Roman bold renders correctly */
+.font-bold, .font-black, .font-extrabold {
+  font-weight: 700;
+}
+
+.font-semibold {
+  font-weight: 600;
+}
+
+.font-medium {
+  font-weight: 500;
+}
+
+/* ── Mono utility — keeps code/numbers in monospace ── */
+.mono,
+.font-mono,
+[class*="font-mono"] {
+  font-family: 'JetBrains Mono', 'Courier New', ui-monospace, monospace !important;
 }
 
 /* ── Selection ── */
@@ -33,7 +226,7 @@ body {
   color: #065f46;
 }
 
-/* ── Scrollbar — hidden globally, visible on hover for overflow containers ── */
+/* ── Scrollbar ── */
 * {
   scrollbar-width: thin;
   scrollbar-color: #cbd5e1 transparent;
@@ -42,9 +235,6 @@ body {
 *::-webkit-scrollbar-track { background: transparent; }
 *::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
 *::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-
-/* ── Mono utility ── */
-.mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 
 /* ── Focus ring ── */
 :focus-visible {

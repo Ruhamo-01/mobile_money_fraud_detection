@@ -9,7 +9,7 @@ const TOKEN = () => localStorage.getItem('session_token');
 const NavItem = ({ page, activePage, setActivePage, icon: Icon, label }) => (
   <button
     onClick={() => setActivePage(page)}
-    className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-xs font-semibold transition-all w-full text-left font-sans relative ${
+    className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-sm font-semibold transition-all w-full text-left relative ${
       activePage === page
         ? 'bg-emerald-500/10 text-emerald-500'
         : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'
@@ -31,7 +31,7 @@ const Button = ({ children, variant = 'primary', className = '', ...props }) => 
   };
   return (
     <button
-      className={`px-4 py-2.5 rounded-lg font-semibold text-xs transition-all font-sans inline-flex items-center gap-1.5 ${variants[variant]} ${className}`}
+      className={`px-4 py-2.5 rounded-lg font-semibold text-sm transition-all inline-flex items-center gap-1.5 ${variants[variant]} ${className}`}
       {...props}
     >
       {children}
@@ -210,6 +210,12 @@ export default function UserDashboard() {
   
   const lookupRecipient = async () => {
     if (recipientPhone.length !== 9) return;
+    // Self-transfer check — compare against current user's phone (last 9 digits)
+    const myPhone = currentUser?.phone?.replace('+250', '').replace(/\s/g, '') || '';
+    if (recipientPhone === myPhone) {
+      setRecipientName(' You cannot send money to yourself.');
+      return;
+    }
     try {
       const r = await fetch(`${API}/api/user/lookup`, {
         method: 'POST',
@@ -250,6 +256,17 @@ export default function UserDashboard() {
   const doTransfer = async () => {
     if (!recipientPhone || !transferAmount) {
       showAlert(setTransferMsg, 'Please fill in all fields', 'error');
+      return;
+    }
+    // Self-transfer check
+    const myPhone = currentUser?.phone?.replace('+250', '').replace(/\s/g, '') || '';
+    if (recipientPhone === myPhone) {
+      showAlert(setTransferMsg, 'You cannot send money to yourself.', 'error');
+      return;
+    }
+    // Blocked recipient check
+    if (recipientName && (recipientName.includes('cannot') || recipientName.includes('deactivated'))) {
+      showAlert(setTransferMsg, 'Cannot transfer to this recipient.', 'error');
       return;
     }
     setShowPinModal(true);
@@ -362,7 +379,6 @@ export default function UserDashboard() {
           session_token  : TOKEN(),
           recipient_phone: '+250' + recipientPhone,
           amount         : parseFloat(transferAmount),
-          pin            : pendingPinInput,
           face_base64    : transferFaceBase64,
         })
       });
@@ -467,19 +483,27 @@ export default function UserDashboard() {
     const base64 = scaled.toDataURL('image/jpeg', 0.92).split(',')[1];
 
     // Validate with backend
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
     try {
       const r = await fetch(`${API}/api/validate-face`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ face_base64: base64 })
+        body: JSON.stringify({ face_base64: base64 }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
       const d = await r.json();
       if (r.ok && (d.success || d.face_detected) && d.face_count > 0) {
         return { base64, error: null };
       }
       return { base64: null, error: d.error || 'No face detected. Ensure your face is centred and well-lit.' };
-    } catch {
-      return { base64: null, error: 'Could not reach server. Check your connection.' };
+    } catch (e) {
+      clearTimeout(timeoutId);
+      if (e.name === 'AbortError') {
+        return { base64: null, error: 'Face validation timed out. Make sure python app.py is running and try again.' };
+      }
+      return { base64: null, error: 'Could not reach server. Make sure python app.py is running on port 5000.' };
     }
   };
 
@@ -492,7 +516,6 @@ export default function UserDashboard() {
       setStream(s);
       if (videoRef.current) {
         videoRef.current.srcObject = s;
-        videoRef.current.style.display = 'block';
         // Mirror video for natural selfie UX — canvas capture does NOT mirror
         videoRef.current.style.transform = 'scaleX(-1)';
       }
@@ -503,7 +526,7 @@ export default function UserDashboard() {
 
   const stopCameraStream = (stream, setStream, videoRef) => {
     if (stream) { stream.getTracks().forEach(t => t.stop()); setStream(null); }
-    if (videoRef?.current) { videoRef.current.srcObject = null; videoRef.current.style.display = 'none'; }
+    if (videoRef?.current) { videoRef.current.srcObject = null; }
   };
   
   const resetStartCamera = async () => {
@@ -766,9 +789,9 @@ export default function UserDashboard() {
                     <div className="p-10 text-sm text-center text-slate-500">No recent transactions</div>
                   ) : (
                     transactions.slice(0, 5).map((tx) => (
-                      <div key={tx.id} className="flex items-center justify-between p-4 text-xs border-b border-slate-200">
+                      <div key={tx.id} className="flex items-center justify-between p-4 text-sm border-b border-slate-200">
                         <div>
-                          <div className="font-semibold text-slate-800">{tx.direction === 'sent' ? '→ ' + (tx.recipient_phone || tx.recipient || '—') : '← ' + (tx.sender_phone || tx.sender || '—')}</div>
+                          <div className="text-sm font-semibold text-slate-800">{tx.direction === 'sent' ? '→ ' + (tx.recipient_phone || tx.recipient || '—') : '← ' + (tx.sender_phone || tx.sender || '—')}</div>
                           <div className="text-slate-500 mt-0.5">{fmtDate(tx.created_at)}</div>
                         </div>
                         <div className="text-right">
@@ -825,7 +848,11 @@ export default function UserDashboard() {
                       />
                     </div>
                     {recipientName && (
-                      <div className="mt-1.5 px-3 py-2 rounded-lg text-xs bg-emerald-50 border border-emerald-300 text-emerald-800 font-semibold">
+                      <div className={`mt-1.5 px-3 py-2 rounded-lg text-xs font-semibold border ${
+                        recipientName.includes('cannot') || recipientName.includes('deactivated') || recipientName.includes('not registered')
+                          ? 'bg-rose-50 border-rose-300 text-rose-800'
+                          : 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                      }`}>
                         {recipientName}
                       </div>
                     )}
@@ -894,9 +921,9 @@ export default function UserDashboard() {
                   <div className="p-10 text-sm text-center text-slate-500">No transactions yet</div>
                 ) : (
                   history.map((tx) => (
-                    <div key={tx.id} className="flex items-center justify-between p-4 text-xs border-b border-slate-200 hover:bg-slate-50 transition-colors">
+                    <div key={tx.reference || tx.id} className="flex items-center justify-between p-4 text-sm border-b border-slate-200 hover:bg-slate-50 transition-colors">
                       <div>
-                        <div className="font-semibold text-slate-800">{tx.direction === 'sent' ? '→ ' + (tx.recipient || tx.recipient_phone || '—') : '← ' + (tx.sender_phone || '—')}</div>
+                        <div className="text-sm font-semibold text-slate-800">{tx.direction === 'sent' ? '→ ' + (tx.recipient || tx.recipient_phone || '—') : '← ' + (tx.sender_phone || '—')}</div>
                         <div className="text-slate-500 mt-0.5">{fmtDate(tx.created_at)}</div>
                         <span className={`inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
                           tx.status === 'completed' ? 'bg-emerald-100 text-emerald-700 border-emerald-300' :
@@ -955,8 +982,27 @@ export default function UserDashboard() {
                   </div>
                   <div className="flex justify-between py-3 text-xs">
                     <span className="font-medium text-slate-600">Account Status</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-700 border border-emerald-300">Active</span>
+                    {(() => {
+                      const s = profile?.status || (profile?.is_active ? 'active' : 'inactive');
+                      const cfg = {
+                        active:   { cls: 'bg-emerald-100 text-emerald-700 border-emerald-300', label: 'Active' },
+                        abroad:   { cls: 'bg-amber-100  text-amber-700  border-amber-300',  label: `Abroad — ${profile?.travel_destination || ''}` },
+                        inactive: { cls: 'bg-rose-100   text-rose-700   border-rose-300',   label: 'Inactive' },
+                      };
+                      const { cls, label } = cfg[s] || cfg.active;
+                      return (
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${cls}`}>
+                          {label}
+                        </span>
+                      );
+                    })()}
                   </div>
+                  {profile?.status === 'abroad' && profile?.travel_return && (
+                    <div className="flex justify-between py-3 text-xs border-t border-slate-200">
+                      <span className="font-medium text-slate-600">Returns</span>
+                      <span className="font-semibold text-slate-900">{profile.travel_return?.split('T')[0]}</span>
+                    </div>
+                  )}
                 </div>
               </Card>
             </div>
@@ -1055,7 +1101,7 @@ export default function UserDashboard() {
                       <p className="text-xs text-slate-600 font-medium mb-3.5 text-center"><strong>Step 3 of 3</strong> — Scan your face to confirm</p>
                       <div className="rounded-xl overflow-hidden bg-black mb-2.5 min-h-[140px] flex items-center justify-center relative">
                         <video ref={resetFaceVideoRef} autoPlay playsInline
-                          className="w-full max-h-[200px] hidden"
+                          className={`w-full max-h-[200px] ${resetStream && !resetFaceCaptured ? 'block' : 'hidden'}`}
                           style={{ transform: 'scaleX(-1)' }} />
                         <canvas ref={resetFaceCanvasRef} className="absolute invisible hidden w-0 h-0" />
                         {resetFaceCaptured && resetFaceBase64 && (
@@ -1162,7 +1208,7 @@ export default function UserDashboard() {
                       <p className="text-xs text-slate-600 mb-2.5">Your new face must match the face already on this account. Eyes, nose, mouth and chin must be clearly visible.</p>
                       <div className="rounded-xl overflow-hidden bg-black mb-2.5 min-h-[140px] flex items-center justify-center relative">
                         <video ref={updateFaceVideoRef} autoPlay playsInline
-                          className="w-full max-h-[200px] hidden"
+                          className={`w-full max-h-[200px] ${updateStream && !updateFaceCaptured ? 'block' : 'hidden'}`}
                           style={{ transform: 'scaleX(-1)' }} />
                         <canvas ref={updateFaceCanvasRef} className="absolute invisible hidden w-0 h-0" />
                         {updateFaceCaptured && updateFaceBase64 && (

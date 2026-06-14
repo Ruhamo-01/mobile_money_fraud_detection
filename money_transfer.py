@@ -36,9 +36,9 @@ class MoneyTransferSystem:
         """Create and return a PostgreSQL database connection."""
         return psycopg2.connect(**self.db_config)
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # DATABASE INIT
-    # ─────────────────────────────────────────────────────────────────────
+    # 
 
     def _init_tables(self):
         conn = self.get_connection()
@@ -107,9 +107,9 @@ class MoneyTransferSystem:
         c.close()
         conn.close()
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # OVER-BALANCE ATTEMPT TRACKING
-    # ─────────────────────────────────────────────────────────────────────
+    # 
 
     def _init_balance_attempt_table(self):
         """
@@ -186,9 +186,9 @@ class MoneyTransferSystem:
         conn.commit()
         conn.close()
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # HELPERS
-    # ─────────────────────────────────────────────────────────────────────
+    # 
 
     def _validate_recipient(self, phone: str) -> dict:
         phone = phone.strip().replace(" ", "")
@@ -228,9 +228,9 @@ class MoneyTransferSystem:
     def _get_balance(self, user_id: int) -> float:
         return self.auth.get_user_balance(user_id)
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # MAIN TRANSFER METHOD
-    # ─────────────────────────────────────────────────────────────────────
+    # 
 
     def initiate_transfer(self, session_token: str,
                           recipient_phone: str,
@@ -238,17 +238,17 @@ class MoneyTransferSystem:
                           transfer_type: str = "mobile_money",
                           face_base64: str = None) -> dict:
 
-        # ── 1. Session validation ────────────────────────────────────────
+        #  1. Session validation 
         user = self.auth.validate_session(session_token)
         if not user:
             return {"success": False,
                     "error": "Session expired. Please log in again."}
 
-        # ── 1b. Travel / SIM block check (sender) ────────────────────────
+        #  1b. Travel / SIM block check (sender) 
         try:
             conn = self.get_connection()
             c = conn.cursor()
-            today = __import__('datetime').date.today().isoformat()
+            today = datetime.now().date().isoformat()
             c.execute('''
                 SELECT destination_country, return_date FROM travel_records
                 WHERE user_phone = %s
@@ -272,14 +272,21 @@ class MoneyTransferSystem:
         except Exception:
             pass
 
-        # ── 2. Recipient validation ───────────────────────────────────────
+        #  2. Recipient validation 
         recipient = self._validate_recipient(recipient_phone)
         if not recipient["valid"]:
             return {"success": False,
                     "error": ("Invalid recipient phone number. "
                               "Use 078, 079 (MTN) or 072, 073 (Airtel) format.")}
 
-        # ── 2b. Recipient travel block check ─────────────────────────────
+        #  2a. Self-transfer check 
+        if recipient["phone"] == user["phone"]:
+            return {
+                "success": False,
+                "error": "You cannot send money to yourself."
+            }
+
+        #  2b. Recipient travel block check 
         try:
             _today = datetime.now().date().isoformat()
             _conn = self.get_connection()
@@ -306,14 +313,14 @@ class MoneyTransferSystem:
         except Exception:
             pass
 
-        # ── 3. Basic input validation (not a rule -- just math) ─────────────
+        #  3. Basic input validation (not a rule -- just math) 
         if not isinstance(amount, (int, float)) or amount <= 0:
             return {"success": False, "error": "Amount must be greater than 0."}
 
         fee   = self._calculate_fee(recipient["network"], amount)
         total = amount + fee
 
-        # ── 3b. Over-balance attempt gating ──────────────────────────────
+        #  3b. Over-balance attempt gating 
         # Rules (applied BEFORE ML to avoid unnecessary model call):
         #   1st attempt with amount > balance  -> show "insufficient balance", done.
         #   2nd attempt:
@@ -359,7 +366,7 @@ class MoneyTransferSystem:
             else:
                 untrusted_flag = False
 
-        # ── 4. ML model -- sole decision maker ────────────────────────────
+        #  4. ML model -- sole decision maker 
         # No hard rules. The model decides everything: velocity bursts,
         # amount spikes, drain patterns -- all learned from data.
         # Over-balance hard rules are handled above; untrusted flag forces face.
@@ -379,7 +386,7 @@ class MoneyTransferSystem:
         rule_score    = fraud_result["rule_score"]
         face_verified = fraud_result.get("face_verified")
 
-        # ── 4a. Face verification required ───────────────────────────────
+        #  4a. Face verification required 
         if action == "REQUIRE_FACE":
             # Include XAI explanation so the frontend can show why
             try:
@@ -398,7 +405,7 @@ class MoneyTransferSystem:
                 "explanation"  : explanation,
             }
 
-        # ── 4b. Blocked by ML model ───────────────────────────────────────
+        #  4b. Blocked by ML model 
         if action == "BLOCK":
             self._record_transfer(
                 sender_id       = user["id"],
@@ -426,7 +433,7 @@ class MoneyTransferSystem:
                 "alert"      : fraud_result.get("alert"),
             }
 
-        # ── 5. Final balance check (safety net -- ML should have caught issues above) ──
+        #  5. Final balance check (safety net -- ML should have caught issues above) 
         balance = self._get_balance(user["id"])
         if balance < total:
             # Shouldn't reach here for 1x (handled before ML) or 2x+ (ML blocks)
@@ -443,24 +450,52 @@ class MoneyTransferSystem:
 
 
 
-        # ── 6. Complete the transfer ──────────────────────────────────────
+        #  6. Complete the transfer — atomic single transaction 
         reference = self._generate_reference()
 
         conn = self.get_connection()
         c = conn.cursor()
+        try:
+            # Both balance updates in one atomic transaction.
+            # If anything fails between debit and credit, the whole thing rolls back.
+            c.execute('''
+                UPDATE users SET account_balance = account_balance - %s
+                WHERE id = %s AND account_balance >= %s
+            ''', (total, user["id"], total))
 
-        c.execute('''
-            UPDATE users SET account_balance = account_balance - %s
-            WHERE id = %s
-        ''', (total, user["id"]))
+            if c.rowcount == 0:
+                # Race condition: balance dropped between our check and the update
+                conn.rollback()
+                return {
+                    "success": False,
+                    "error": (
+                        f"Insufficient balance. "
+                        f"Required: {total:,.0f} RWF, "
+                        f"but your balance has changed. Please try again."
+                    )
+                }
 
-        c.execute('''
-            UPDATE users SET account_balance = account_balance + %s
-            WHERE phone_number = %s AND is_active = TRUE
-        ''', (amount, recipient["phone"]))
+            c.execute('''
+                UPDATE users SET account_balance = account_balance + %s
+                WHERE phone_number = %s AND is_active = TRUE
+            ''', (amount, recipient["phone"]))
 
-        conn.commit()
-        conn.close()
+            if c.rowcount == 0:
+                # Recipient was deactivated or deleted between validation and credit
+                conn.rollback()
+                conn.close()
+                return {
+                    "success": False,
+                    "error": "Recipient account is no longer active. Transfer cancelled and your balance has been restored."
+                }
+
+            conn.commit()
+        except Exception as transfer_err:
+            conn.rollback()
+            conn.close()
+            return {"success": False, "error": f"Transfer failed: {transfer_err}"}
+        finally:
+            conn.close()
 
         # Reset over-balance counter -- legitimate transfer completed.
         self._reset_over_balance(user["id"])
@@ -498,9 +533,9 @@ class MoneyTransferSystem:
             "face_verified": face_verified,
         }
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # RECORD HELPER
-    # ─────────────────────────────────────────────────────────────────────
+    # 
 
     def _record_transfer(self, sender_id, recipient_phone, amount,
                          transfer_type, network, reference, status,
@@ -521,9 +556,9 @@ class MoneyTransferSystem:
         conn.commit()
         conn.close()
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # TRANSFER HISTORY
-    # ─────────────────────────────────────────────────────────────────────
+    # 
 
     def get_transfer_history(self, session_token: str, limit: int = 50) -> dict:
         user = self.auth.validate_session(session_token)
@@ -567,7 +602,7 @@ class MoneyTransferSystem:
         for r in all_rows:
             transfers.append({
                 "reference"    : r[0],
-                "recipient"    : r[1],
+                "recipient_phone": r[1],
                 "amount"       : r[2],
                 "fee"          : r[3],
                 "network"      : r[4],
@@ -584,9 +619,9 @@ class MoneyTransferSystem:
 
         return {"success": True, "transfers": transfers}
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # NETWORK INFO
-    # ─────────────────────────────────────────────────────────────────────
+    # 
 
     def get_network_info(self, phone: str) -> dict:
         return self._validate_recipient(phone)

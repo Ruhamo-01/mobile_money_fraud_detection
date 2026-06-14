@@ -21,9 +21,9 @@ import os
 from datetime import datetime, timedelta
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # 1. USER REGISTRATION SYSTEM  (phone ↔ name ↔ face mapping)
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 class UserRegistrationSystem:
     def __init__(self, db_config):
         self.db_config = db_config
@@ -123,9 +123,9 @@ class UserRegistrationSystem:
         c.close()
         conn.close()
 
-    # ── Face encoding helpers ─────────────────────────────────────────────
+    #  Face encoding helpers 
 
-    # ── Landmark completeness check ───────────────────────────────────────
+    #  Landmark completeness check 
 
     def _check_face_completeness(self, face_landmarks: dict) -> dict:
         """
@@ -291,7 +291,7 @@ class UserRegistrationSystem:
 
             img_array = np.array(img)
 
-            # ── 1. Brightness / quality check ────────────────────────────
+            #  1. Brightness / quality check 
             avg_brightness = img_array.mean()
             if avg_brightness < 25:
                 return {
@@ -306,7 +306,7 @@ class UserRegistrationSystem:
                     "face_count": 0
                 }
 
-            # ── 2. Detect face locations with upsampling ──────────────────
+            #  2. Detect face locations with upsampling 
             face_locations = face_recognition.face_locations(img_array, model="hog", number_of_times_to_upsample=2)
             if not face_locations:
                 # Fallback: try with 2x upscaled image
@@ -331,7 +331,7 @@ class UserRegistrationSystem:
                     "face_count": len(face_locations)
                 }
 
-            # ── 3. Face size / quality gate ───────────────────────────────
+            #  3. Face size / quality gate 
             top, right, bottom, left = face_locations[0]
             face_width  = right - left
             face_height = bottom - top
@@ -346,7 +346,7 @@ class UserRegistrationSystem:
                     "face_count": 1
                 }
 
-            # ── 4a. Face must cover enough of the image (not too far away) ─
+            #  4a. Face must cover enough of the image (not too far away) 
             img_h, img_w = img_array.shape[:2]
             face_area_ratio = (face_width * face_height) / (img_w * img_h)
             if face_area_ratio < 0.04:
@@ -359,7 +359,7 @@ class UserRegistrationSystem:
                     "face_count": 1
                 }
 
-            # ── 4b. Face must not be clipped at image edge ────────────────
+            #  4b. Face must not be clipped at image edge 
             margin = 5  # pixels
             if top < margin or left < margin or right > img_w - margin or bottom > img_h - margin:
                 return {
@@ -371,7 +371,7 @@ class UserRegistrationSystem:
                     "face_count": 1
                 }
 
-            # ── 4c. Landmark completeness -- eyes, nose, mouth must be visible ──
+            #  4c. Landmark completeness -- eyes, nose, mouth must be visible 
             all_landmarks = face_recognition.face_landmarks(img_array, face_locations)
             if not all_landmarks:
                 return {
@@ -391,7 +391,7 @@ class UserRegistrationSystem:
                     "face_count": 1
                 }
 
-            # ── 4d. Eyes must be open -- check eye height ──────────────────
+            #  4d. Eyes must be open -- check eye height 
             lm = all_landmarks[0]
             def _eye_openness(eye_pts):
                 if not eye_pts or len(eye_pts) < 4:
@@ -414,7 +414,7 @@ class UserRegistrationSystem:
                     "face_count": 1
                 }
 
-            # ── 4e. Face must be roughly upright -- chin below nose ────────
+            #  4e. Face must be roughly upright -- chin below nose 
             nose_pts = lm.get("nose_tip", [])
             chin_pts = lm.get("chin", [])
             if nose_pts and chin_pts:
@@ -430,7 +430,7 @@ class UserRegistrationSystem:
                         "face_count": 1
                     }
 
-            # ── 5. Generate encoding ──────────────────────────────────────
+            #  5. Generate encoding 
             encodings = face_recognition.face_encodings(img_array, face_locations)
             if not encodings:
                 return {
@@ -439,7 +439,7 @@ class UserRegistrationSystem:
                     "face_count": 1
                 }
 
-            # ── 6. Save image to uploads/ folder ─────────────────────────
+            #  6. Save image to uploads/ folder 
             uploads_dir = "uploads"
             os.makedirs(uploads_dir, exist_ok=True)
 
@@ -506,7 +506,7 @@ class UserRegistrationSystem:
             import io
             from PIL import Image
 
-            # ── Decode and validate live image ────────────────────────────
+            #  Decode and validate live image 
             img_bytes  = base64.b64decode(base64_str)
             img        = Image.open(io.BytesIO(img_bytes)).convert("RGB")
 
@@ -550,7 +550,7 @@ class UserRegistrationSystem:
                 return {"verified": False, "error": "Could not generate face encoding from submitted image."}
             live_enc = live_encs[0]
 
-            # ── Source 1: Compare against DB encoding ─────────────────────
+            #  Source 1: Compare against DB encoding 
             # Robustly decode the stored encoding -- handle both 128-dim float64
             # vectors AND legacy raw JPEG bytes stored by the fallback path.
             stored_enc_db = None
@@ -585,7 +585,7 @@ class UserRegistrationSystem:
             dist_db  = float(face_recognition.face_distance([stored_enc_db], live_enc)[0])
             match_db = dist_db <= tolerance
 
-            # ── Source 2: Compare against saved folder image ──────────────
+            #  Source 2: Compare against saved folder image 
             dist_file  = None
             match_file = None
 
@@ -606,7 +606,7 @@ class UserRegistrationSystem:
                 # Handle NULL/empty paths for existing users without saved face images
                 print(f"[FaceVerify] No saved face image available (user registered before image saving) -- using DB encoding only")
 
-            # ── Decision ──────────────────────────────────────────────────
+            #  Decision 
             if match_file is not None:
                 verified = match_db and match_file
                 source   = "db+folder"
@@ -645,7 +645,7 @@ class UserRegistrationSystem:
         except Exception as e:
             return {"verified": False, "error": str(e)}
 
-    # ── Registration ──────────────────────────────────────────────────────
+    #  Registration 
 
     def register_user_with_face(self, phone_number: str, full_name: str,
                                 national_id: str, email: str,
@@ -775,11 +775,11 @@ class UserRegistrationSystem:
         return row is not None and row[0] is not None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # 2. TRAVEL MONITORING SYSTEM
 #    When a SIM is registered as abroad -> all outgoing transfers are blocked.
 #    SIM is re-enabled only when user confirms return.
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 class TravelMonitoringSystem:
     def __init__(self, user_system: UserRegistrationSystem):
         self.user_system = user_system
@@ -917,9 +917,9 @@ class TravelMonitoringSystem:
         }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # 3. TRANSACTION ANOMALY DETECTOR  (rule-based, complements ML model)
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 class TransactionAnomalyDetector:
     ANOMALY_THRESHOLD = 0.65   # above this -> face verification required
 
@@ -1026,9 +1026,9 @@ class TransactionAnomalyDetector:
         }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # 4. PIN MONITORING SYSTEM
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 class PinMonitoringSystem:
     def __init__(self, user_system: UserRegistrationSystem):
         self.user_system = user_system
@@ -1107,9 +1107,9 @@ class PinMonitoringSystem:
         }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # 5. FRAUD ALERT SYSTEM  (notifies service provider in real time)
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 class FraudAlertSystem:
     """
     Sends structured alerts to the service provider dashboard whenever
@@ -1140,10 +1140,16 @@ class FraudAlertSystem:
                 risk_level     TEXT,
                 action         TEXT,
                 alert_message  TEXT,
-                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                acknowledged   BOOLEAN DEFAULT FALSE
+                created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                acknowledged   BOOLEAN DEFAULT FALSE,
+                explanation    TEXT
             )
         ''')
+        # Safe migration: add explanation column if it was created without it
+        try:
+            c.execute("ALTER TABLE fraud_alerts ADD COLUMN IF NOT EXISTS explanation TEXT")
+        except Exception:
+            pass
         conn.commit()
         c.close()
         conn.close()
@@ -1188,9 +1194,19 @@ class FraudAlertSystem:
         c.close()
         conn.close()
         return [
-            {"id": r[0], "phone": r[1], "amount": r[2], "fraud_score": r[3],
-             "risk_level": r[4], "action": r[5], "message": r[6], "created_at": r[7],
-             "explanation": r[8]}   # stored at alert-creation time
+            {
+                "id"          : r[0],
+                "phone_number": r[1],   # admin/provider dashboards use phone_number
+                "phone"       : r[1],   # keep phone alias for backward compat
+                "amount"      : r[2] or 0,
+                "fraud_score" : r[3],
+                "risk_level"  : r[4],
+                "action"      : r[5],
+                "message"     : r[6],
+                "alert_message": r[6],  # alias so both field names work in frontend
+                "created_at"  : r[7].isoformat() if r[7] else None,
+                "explanation" : r[8] if isinstance(r[8], dict) else (json.loads(r[8]) if r[8] else None),
+            }
             for r in rows
         ]
 
@@ -1366,9 +1382,9 @@ def _rule_based_explanation(features: list, feature_names: list,
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # 6. REAL-TIME FRAUD DETECTOR  (main engine, used by money_transfer.py)
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 class RealTimeFraudDetector:
     """
     Pipeline:
@@ -1431,7 +1447,7 @@ class RealTimeFraudDetector:
         except Exception as e:
             print(f"[FraudDetector] Error loading model: {e}")
 
-    # ── Feature builder ───────────────────────────────────────────────────
+    #  Feature builder 
 
     def _build_ml_features(self, phone_number: str, amount: float,
                             network: str) -> list:
@@ -1443,7 +1459,7 @@ class RealTimeFraudDetector:
         hour_of_day, is_high_amount, amount_vs_typical, is_amount_spike,
         pin_near_lockout, amount_exceeds_balance, hard_block_signal, excess_ratio
         """
-        # Get live balance
+        # Get live balance (sender)
         conn = self.get_connection()
         c = conn.cursor()
         c.execute("SELECT account_balance FROM users WHERE phone_number = %s",
@@ -1454,6 +1470,20 @@ class RealTimeFraudDetector:
         c.execute("SELECT COALESCE(pin_fail_count, 0) FROM users WHERE phone_number = %s",
                   (phone_number,))
         pin_row = c.fetchone()
+
+        # Get recipient balance — used for dest_zero_before and log_old_dest features
+        # These were trained on PaySim data where recipient balance is meaningful signal.
+        # We look up by recipient_phone passed to evaluate_transaction; fall back to 0.
+        # Note: recipient_phone is not in the function signature, so we store it on the
+        # class temporarily via evaluate_transaction or use a default of 0 when unknown.
+        dest_balance = 0.0
+        if hasattr(self, '_current_recipient_phone') and self._current_recipient_phone:
+            c.execute("SELECT account_balance FROM users WHERE phone_number = %s",
+                      (self._current_recipient_phone,))
+            dest_row = c.fetchone()
+            if dest_row:
+                dest_balance = dest_row[0]
+
         conn.close()
 
         old_balance   = row[0] if row else 0.0
@@ -1463,23 +1493,26 @@ class RealTimeFraudDetector:
         # Historical pattern
         pattern    = self.anomaly_det.get_user_transaction_pattern(phone_number)
         # Use median as the baseline -- it's robust against outlier large transfers
-        # that would inflate the mean and hide genuine spikes
+        # that would inflate the mean and hide genuine spikes.
+        # If no history yet, default to 500 RWF so that transfers over 2,500 RWF
+        # (5x baseline) still register as a spike on the very first transaction.
         if pattern:
             avg_amount = pattern.get("median_amount") or pattern["avg_amount"]
         else:
-            avg_amount = amount
+            avg_amount = 500.0   # safe default: 5x = 2,500 RWF spike threshold
 
         # Derived features
+        dest_new_balance    = dest_balance + amount
         log_amount          = np.log1p(amount)
         log_old_orig        = np.log1p(old_balance)
         log_new_orig        = np.log1p(new_balance)
-        log_old_dest        = 0.0
-        log_new_dest        = log_amount
+        log_old_dest        = np.log1p(dest_balance)
+        log_new_dest        = np.log1p(dest_new_balance)
         orig_balance_drop   = log_old_orig - log_new_orig
         dest_balance_gain   = log_new_dest - log_old_dest
         balance_mismatch    = orig_balance_drop - dest_balance_gain
         sender_zero_after   = int(new_balance == 0)
-        dest_zero_before    = 0
+        dest_zero_before    = int(dest_balance == 0)
         amount_to_bal_ratio = amount / (old_balance + 1)
 
         type_map     = {"MTN": 4, "Airtel": 4}
@@ -1529,7 +1562,7 @@ class RealTimeFraudDetector:
             excess_ratio,           # 19 excess_ratio
         ]
 
-    # ── ML scoring ────────────────────────────────────────────────────────
+    #  ML scoring 
 
     def ml_score(self, phone_number: str, amount: float, network: str) -> float:
         """Return ML fraud probability (0-1). Falls back to 0.5 on error."""
@@ -1594,7 +1627,7 @@ class RealTimeFraudDetector:
             features  = self._build_ml_features(phone_number, amount, network)
             feat_dict = dict(zip(feature_names, features))
 
-            # ── Get fraud probability ─────────────────────────────────────
+            #  Get fraud probability 
             if self.model and self.scaler:
                 import warnings
                 vec = np.array([features])
@@ -1605,12 +1638,12 @@ class RealTimeFraudDetector:
             else:
                 fraud_prob = 0.5
 
-            # ── PRIMARY: Rule-based explanation ───────────────────────────
+            #  PRIMARY: Rule-based explanation 
             # Always generated -- fast, human-readable, no dependencies
             rule_exp = _rule_based_explanation(
                 features, feature_names, feature_labels, fraud_prob, self.threshold)
 
-            # ── SECONDARY: Feature importance ─────────────────────────────
+            #  SECONDARY: Feature importance 
             # Uses model's built-in feature importances -- no SHAP needed
             feature_importance_factors = []
             if self.model and hasattr(self.model, 'feature_importances_'):
@@ -1660,7 +1693,7 @@ class RealTimeFraudDetector:
                 },
             }
 
-            # ── DEEP MODE: Add SHAP (admin only) ─────────────────────────
+            #  DEEP MODE: Add SHAP (admin only) 
             if mode == "deep" and self.explainer is not None and self.model and self.scaler:
                 try:
                     import warnings
@@ -1695,7 +1728,7 @@ class RealTimeFraudDetector:
                 "fraud_score": 0.5,
             }
 
-    # ── Main check ────────────────────────────────────────────────────────
+    #  Main check 
 
     def evaluate_transaction(self, phone_number: str, amount: float,
                              recipient_phone: str, network: str,
@@ -1733,7 +1766,7 @@ class RealTimeFraudDetector:
             "checks"       : checks,
         }
 
-        # ── 1. User active%s ───────────────────────────────────────────────
+        #  1. User active%s 
         user = self.user_reg.get_user_info(phone_number)
         if not user:
             checks["user"] = {"passed": False, "msg": "User not found"}
@@ -1748,12 +1781,12 @@ class RealTimeFraudDetector:
             return result
         checks["user"] = {"passed": True, "msg": f"Active user: {user['full_name']}"}
 
-        # ── 2. ML is the sole judge -- no hard balance-multiplier rule ────
+        #  2. ML is the sole judge -- no hard balance-multiplier rule 
         #   The model was trained on excess_ratio and amount_exceeds_balance
         #   features, so 2x / 3x above balance is detected by ML alone.
         checks["balance_multiplier"] = {"passed": True, "msg": "Delegated to ML model"}
 
-        # ── 3. Travel check ───────────────────────────────────────────────
+        #  3. Travel check 
         if self.travel_sys.is_user_abroad(phone_number):
             checks["travel"] = {"passed": False,
                                  "msg": "User is registered as abroad -- transfers blocked."}
@@ -1768,18 +1801,40 @@ class RealTimeFraudDetector:
             return result
         checks["travel"] = {"passed": True, "msg": "User is in country"}
 
-        # ── 4. ML model score -- SOLE fraud decision ───────────────────────
-        #   Build features BEFORE logging this transaction so avg_amount
-        #   reflects only past history, not the current transaction.
-        #   This ensures amount_vs_typical and is_amount_spike are accurate.
-        ml_s = self.ml_score(phone_number, amount, network)
+        #  4. ML model score -- SOLE fraud decision 
+        #   Build features ONCE and reuse for both ML scoring and behavioural override.
+        #   This prevents the double-build race condition where record_transaction
+        #   writes to history between the first and second _build_ml_features call,
+        #   causing the spike check to see a different baseline than the ML score used.
+        self._current_recipient_phone = recipient_phone
+        try:
+            shared_feats = self._build_ml_features(phone_number, amount, network)
+        except Exception:
+            shared_feats = None
+        self._current_recipient_phone = None
+
+        # Score using the shared feature vector
+        if shared_feats is not None and self.model and self.scaler:
+            try:
+                import warnings
+                vec = np.array([shared_feats])
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    vec_s = self.scaler.transform(vec)
+                ml_s = float(self.model.predict_proba(vec_s)[0][1])
+            except Exception as e:
+                print(f"[MLScore] Error: {e}")
+                ml_s = 0.5
+        else:
+            ml_s = self.ml_score(phone_number, amount, network)
+
         checks["ml_model"] = {
             "score"    : round(ml_s, 4),
             "threshold": self.threshold,
             "msg"      : f"ML fraud probability: {ml_s:.4f}"
         }
 
-        # ── 5. Log transaction to history AFTER scoring ───────────────────
+        #  5. Log transaction to history AFTER scoring 
         #   record_transaction() writes to transaction_history for future
         #   ML feature building. Logging AFTER scoring prevents the current
         #   transaction from inflating avg_amount before the spike check.
@@ -1790,14 +1845,14 @@ class RealTimeFraudDetector:
             "msg"   : "Transaction recorded for ML feature history."
         }
 
-        # ── 6. Fraud score = ML score only ────────────────────────────────
+        #  6. Fraud score = ML score only 
         combined = round(ml_s, 4)
 
         result["fraud_score"] = combined
         result["ml_score"]    = round(ml_s, 4)
         result["rule_score"]  = 0.0   # not used in decision
 
-        # ── 7. Risk classification ────────────────────────────────────────
+        #  7. Risk classification 
         # Primary: ML score thresholds
         # Override: explicit behavioural signals that always require face
         #   regardless of ML score (the model was trained on PaySim data
@@ -1809,29 +1864,41 @@ class RealTimeFraudDetector:
         else:
             result["risk_level"] = "LOW"
 
-        # ── Behavioural override: force REQUIRE_FACE on clear spike signals ──
-        # Build features to check spike/drain signals directly
+        #  Behavioural override: force REQUIRE_FACE on clear spike signals 
+        # Reuse the already-built feature vector — do NOT rebuild here.
+        # Rebuilding after record_transaction() would see the current transaction
+        # in history, inflating the median and hiding the spike.
         try:
-            feats = self._build_ml_features(phone_number, amount, network)
-            # feats[15] = is_amount_spike, feats[8] = sender_zero_after
-            is_spike = feats[15]   # 1 if amount > 5x user average
-            is_drain = feats[8]    # 1 if balance would reach zero
-            if is_spike and result["risk_level"] == "LOW":
+            feats    = shared_feats if shared_feats is not None else []
+            is_spike = feats[15] if len(feats) > 15 else 0  # is_amount_spike
+            is_drain = feats[8]  if len(feats) > 8  else 0  # sender_zero_after
+
+            # Also catch moderate spikes (3x) that the ML model may miss on
+            # small-account users because PaySim trained on larger USD amounts
+            avg_amount_check = 0
+            pattern = self.anomaly_det.get_user_transaction_pattern(phone_number)
+            if pattern:
+                avg_amount_check = pattern.get("median_amount") or pattern["avg_amount"]
+            else:
+                avg_amount_check = 500.0
+            is_moderate_spike = int(amount > 3 * (avg_amount_check + 1))
+
+            if (is_spike or is_moderate_spike) and result["risk_level"] == "LOW":
                 result["risk_level"] = "MEDIUM"
                 checks["behavioural_override"] = {
                     "reason": "amount_spike",
-                    "msg"   : f"Amount is >5x user average -- face verification required."
+                    "msg"   : f"Amount is >3x user average — face verification required."
                 }
             elif is_drain and result["risk_level"] == "LOW":
                 result["risk_level"] = "MEDIUM"
                 checks["behavioural_override"] = {
                     "reason": "account_drain",
-                    "msg"   : "Transfer would drain account to zero -- face verification required."
+                    "msg"   : "Transfer would drain account to zero — face verification required."
                 }
         except Exception:
             pass  # never block a transaction due to feature-build error
 
-        # ── 7b. Untrusted user override ───────────────────────────────────
+        #  7b. Untrusted user override 
         # If money_transfer.py flagged this user as untrusted (they previously
         # attempted a transfer that exceeded their balance), force face
         # verification even if the ML score would normally ALLOW the transaction.
@@ -1845,7 +1912,7 @@ class RealTimeFraudDetector:
                 )
             }
 
-        # ── 8. Face verification gate ─────────────────────────────────────
+        #  8. Face verification gate 
         if result["risk_level"] in ("HIGH", "MEDIUM"):
             if face_base64:
                 # User has provided face image -- verify it
@@ -1927,7 +1994,7 @@ class RealTimeFraudDetector:
 
         return result
 
-    # ── Convenience wrappers ──────────────────────────────────────────────
+    #  Convenience wrappers 
 
     def get_fraud_alerts(self) -> list:
         """Return all unacknowledged alerts (for admin dashboard)."""

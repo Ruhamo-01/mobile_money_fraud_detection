@@ -24,14 +24,14 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    fetch(`${API}/api/dashboard/stats`)
+    fetch(`${API}/api/public/stats`)
       .then(r => r.json())
       .then(d => { if (d.success) setStats(d.stats); })
       .catch(() => {});
   }, []);
 
   const features = [
-    { icon: Brain,       label: 'AI Fraud Detection',      sub: 'XGBoost · 97.3% AUC' },
+    { icon: Brain,       label: 'ML Fraud Detection',      sub: 'XGBoost · 97.3% AUC' },
     { icon: Fingerprint, label: 'Face Verification',        sub: 'Biometric identity gate' },
     { icon: Lock,        label: 'PIN Security',             sub: '3-strike lockout' },
     { icon: Globe,       label: 'Travel SIM Control',       sub: 'Block transfers abroad' },
@@ -78,8 +78,8 @@ export default function HomePage() {
           </div>
 
           <div className="items-center hidden gap-6 md:flex">
-            <a href="#features" className="text-sm transition-colors text-slate-600 hover:text-slate-900">Features</a>
-            <a href="#dashboards" className="text-sm transition-colors text-slate-600 hover:text-slate-900">Dashboards</a>
+            <a href="#features" className="text-sm font-medium transition-colors text-slate-600 hover:text-slate-900">Features</a>
+            <a href="#dashboards" className="text-sm font-medium transition-colors text-slate-600 hover:text-slate-900">Dashboards</a>
             <button onClick={() => navigate('/login')} className="text-sm transition-colors text-slate-600 hover:text-slate-900">Sign In</button>
             <button onClick={() => navigate('/login')}
               className="px-4 py-2 text-sm font-semibold text-white transition-colors rounded-lg bg-emerald-600 hover:bg-emerald-700">
@@ -112,13 +112,13 @@ export default function HomePage() {
       <section className="px-5 pb-20 text-center pt-28 bg-gradient-to-b from-slate-50 to-white">
         <div className="max-w-3xl mx-auto">
           <span className="inline-block px-3 py-1 mb-6 text-xs font-semibold border rounded-full text-emerald-700 bg-emerald-100 border-emerald-200">
-            AI-Powered · Rwanda MoMo · Real-Time
+            ML-Powered · Rwanda MoMo · Real-Time
           </span>
           <h1 className="mb-5 text-4xl font-black leading-tight sm:text-5xl md:text-6xl text-slate-900">
             Protect Every<br />
             <span className="text-emerald-600">Mobile Transaction</span>
           </h1>
-          <p className="max-w-xl mx-auto mb-8 text-base leading-relaxed sm:text-lg text-slate-600">
+          <p className="max-w-xl mx-auto mb-8 text-base font-medium leading-relaxed sm:text-lg text-slate-600">
             MoMo Shield uses machine learning and biometric verification to detect and block fraud before it reaches your customers.
           </p>
           <div className="flex flex-col justify-center gap-3 sm:flex-row">
@@ -147,7 +147,7 @@ export default function HomePage() {
             <div key={label} className="py-4 text-center">
               <Icon className={`w-5 h-5 ${color} mx-auto mb-2`} />
               <div className={`text-2xl font-black font-mono ${color}`}>{value ?? '—'}</div>
-              <div className="mt-1 text-xs text-slate-500">{label}</div>
+              <div className="mt-1 text-xs font-medium text-slate-500">{label}</div>
             </div>
           ))}
         </div>
@@ -168,7 +168,7 @@ export default function HomePage() {
                 </div>
                 <div>
                   <div className="text-sm font-bold text-slate-900">{label}</div>
-                  <div className="text-xs text-slate-500 mt-0.5">{sub}</div>
+                  <div className="text-xs font-medium text-slate-500 mt-0.5">{sub}</div>
                 </div>
               </div>
             ))}
@@ -192,7 +192,7 @@ export default function HomePage() {
                     <Icon className={`w-5 h-5 ${c.text}`} />
                   </div>
                   <h3 className="mb-1 text-base font-bold text-slate-900">{title}</h3>
-                  <p className="mb-5 text-xs leading-relaxed text-slate-600">{desc}</p>
+                  <p className="mb-5 text-sm leading-relaxed text-slate-600">{desc}</p>
                   <button onClick={() => navigate('/login')}
                     className={`w-full py-2 text-xs font-semibold text-white rounded-lg ${c.btn} transition-colors`}>
                     Open Dashboard
@@ -214,7 +214,7 @@ export default function HomePage() {
             <span className="text-sm font-bold text-slate-900">MoMo Shield</span>
             <span className="text-xs text-slate-400">v2.0</span>
           </div>
-          <p className="text-xs text-slate-500">AI-Powered Mobile Money Fraud Detection · Rwanda · MTN & Airtel</p>
+          <p className="text-xs font-medium text-slate-500">ML-Powered Mobile Money Fraud Detection · Rwanda · MTN </p>
           <button onClick={() => navigate('/login')}
             className="text-xs font-semibold transition-colors text-emerald-700 hover:text-emerald-800">
             Sign In →

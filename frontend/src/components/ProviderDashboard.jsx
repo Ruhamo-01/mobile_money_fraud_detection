@@ -6,10 +6,15 @@ import { fmtRWF, fmtDate, showAlert } from '../utils/helpers';
 const API = '';
 const TOKEN = () => localStorage.getItem('session_token');
 
+const authHeaders = () => ({
+  'Content-Type': 'application/json',
+  'Authorization': 'Bearer ' + (localStorage.getItem('session_token') || ''),
+});
+
 const NavItem = ({ page, icon: Icon, label, badge, activePage, onNavigate }) => (
   <button
     onClick={() => onNavigate(page)}
-    className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-xs font-semibold transition-all w-full text-left font-sans relative ${
+    className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg text-sm font-semibold transition-all w-full text-left relative ${
       activePage === page
         ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
         : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'
@@ -36,7 +41,7 @@ const Button = ({ children, variant = 'primary', className = '', ...props }) => 
   };
   return (
     <button
-      className={`px-4 py-2.5 rounded-lg font-semibold text-xs transition-all font-sans inline-flex items-center gap-1.5 ${variants[variant]} ${className}`}
+      className={`px-4 py-2.5 rounded-lg font-semibold text-sm transition-all inline-flex items-center gap-1.5 ${variants[variant]} ${className}`}
       {...props}
     >
       {children}
@@ -57,8 +62,8 @@ const AlertMsg = ({ msg }) => (
 );
 
 const StatCard = ({ value, label }) => (
-  <div className="p-6 text-center bg-white border-2 shadow-lg border-slate-200 rounded-2xl hover:border-emerald-300 hover:shadow-xl transition-all">
-    <div className="font-mono text-2xl font-bold text-emerald-600 mb-1">{value}</div>
+  <div className="p-6 text-center transition-all bg-white border-2 shadow-lg border-slate-200 rounded-2xl hover:border-emerald-300 hover:shadow-xl">
+    <div className="mb-1 font-mono text-2xl font-bold text-emerald-600">{value}</div>
     <div className="text-xs font-semibold text-slate-600 mt-1.5">{label}</div>
   </div>
 );
@@ -66,43 +71,43 @@ const StatCard = ({ value, label }) => (
 // ── XAI Explanation Panel ─────────────────────────────────────────────────
 const ExplainPanel = ({ explanation, loading }) => {
   if (loading) return (
-    <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 flex items-center gap-2 animate-pulse">
+    <div className="flex items-center gap-2 p-3 mt-3 text-sm border bg-slate-50 border-slate-200 rounded-xl text-slate-500 animate-pulse">
       <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-500 flex-shrink-0" />
-      Generating AI explanation…
+      Generating ML explanation…
     </div>
   );
   if (!explanation) return null;
   if (!explanation.available) return (
-    <div className="mt-3 p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700">
+    <div className="p-3 mt-3 text-sm border bg-rose-50 border-rose-200 rounded-xl text-rose-700">
       {explanation.error || 'Explanation unavailable'}
     </div>
   );
   const factors = explanation.top_factors || [];
   const maxImpact = Math.max(...factors.map(f => Math.abs(f.shap_value || f.importance || 0.001)), 0.001);
   return (
-    <div className="mt-3 border border-violet-200 rounded-xl overflow-hidden">
-      <div className="bg-violet-50 px-4 py-2 flex items-center gap-2 border-b border-violet-200">
+    <div className="mt-3 overflow-hidden border border-violet-200 rounded-xl">
+      <div className="flex items-center gap-2 px-4 py-2 border-b bg-violet-50 border-violet-200">
         <Activity className="w-3.5 h-3.5 text-violet-600 flex-shrink-0" />
-        <span className="text-xs font-bold text-violet-800">AI Explanation</span>
+        <span className="text-xs font-bold text-violet-800">ML Explanation</span>
         <span className="ml-auto text-[10px] text-violet-500 font-medium bg-violet-100 px-2 py-0.5 rounded-full">
           {explanation.method}
         </span>
       </div>
-      <div className="bg-white px-4 py-3 space-y-3">
+      <div className="px-4 py-3 space-y-3 bg-white">
         {factors.slice(0, 5).map((f, i) => {
           const isRisk = f.direction === 'increases_risk';
           const pct = Math.min(Math.abs(f.shap_value || f.importance || 0) / maxImpact * 100, 100);
           return (
             <div key={i}>
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-semibold text-slate-800">{f.label}</span>
+                <span className="text-sm font-semibold text-slate-800">{f.label}</span>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                   isRisk ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'
                 }`}>
                   {isRisk ? '↑ Increases Risk' : '↓ Decreases Risk'}
                 </span>
               </div>
-              <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+              <div className="w-full h-2 overflow-hidden rounded-full bg-slate-100">
                 <div
                   className={`h-full rounded-full ${isRisk ? 'bg-rose-400' : 'bg-emerald-400'}`}
                   style={{ width: `${pct}%`, transition: 'width 0.6s ease' }}
@@ -131,6 +136,7 @@ export default function ProviderDashboard() {
   const [stats, setStats] = useState({});
   const [alerts, setAlerts] = useState([]);
   const [users, setUsers] = useState([]);
+  const [usersLoaded, setUsersLoaded] = useState(false);
   const [lookupResult, setLookupResult] = useState(null);
   const [lookupPhone, setLookupPhone] = useState('');
   const [lookupMsg, setLookupMsg] = useState({ show: false, message: '', type: 'success' });
@@ -149,13 +155,13 @@ export default function ProviderDashboard() {
   const [travelReturn, setTravelReturn] = useState('');
   const [travelDest, setTravelDest] = useState('');
   const [travelMsg, setTravelMsg] = useState({ show: false, message: '', type: 'success' });
+  const [minDate, setMinDate] = useState('');
   
   const [reactPhone, setReactPhone] = useState('');
   const [reactMsg, setReactMsg] = useState({ show: false, message: '', type: 'success' });
   const [checkTravelPhone, setCheckTravelPhone] = useState('');
   const [travelStatus, setTravelStatus] = useState(null);
-  
-  let currentUser = null;
+  const [currentUser, setCurrentUser] = useState(null);
   
   useEffect(() => {
     setMinDates();
@@ -169,7 +175,7 @@ export default function ProviderDashboard() {
   
   const setMinDates = () => {
     const today = new Date().toISOString().split('T')[0];
-    // Set min dates for travel inputs
+    setMinDate(today);
   };
   
   const init = async () => {
@@ -180,11 +186,11 @@ export default function ProviderDashboard() {
         body: JSON.stringify({ session_token: TOKEN() })
       });
       const d = await r.json();
-      if (!d.success) {
+      if (!d.success || d.dashboard_type !== 'provider') {
         navigate('/login');
         return;
       }
-      currentUser = d.user;
+      setCurrentUser(d.user);
       loadStats();
       loadAlerts(true);
     } catch {
@@ -205,7 +211,7 @@ export default function ProviderDashboard() {
   const loadStats = async () => {
     try {
       const [statsRes, healthRes] = await Promise.all([
-        fetch(`${API}/api/dashboard/stats`),
+        fetch(`${API}/api/dashboard/stats`, { headers: authHeaders() }),
         fetch(`${API}/api/health`)
       ]);
       const statsData = await statsRes.json();
@@ -224,7 +230,7 @@ export default function ProviderDashboard() {
   
   const loadAlerts = async (previewOnly = false) => {
     try {
-      const r = await fetch(`${API}/api/fraud/alerts`);
+      const r = await fetch(`${API}/api/fraud/alerts`, { headers: authHeaders() });
       const d = await r.json();
       if (d.success) {
         setAlerts(previewOnly ? (d.alerts || []).slice(0, 3) : (d.alerts || []));
@@ -236,13 +242,15 @@ export default function ProviderDashboard() {
   
   const loadUsers = async () => {
     try {
-      const r = await fetch(`${API}/api/admin/users`);
+      const r = await fetch(`${API}/api/admin/users`, { headers: authHeaders() });
       const d = await r.json();
       if (d.success) {
         setUsers(d.users || []);
+        setUsersLoaded(true);
       }
     } catch (e) {
       console.error('Users error:', e);
+      setUsersLoaded(true);
     }
   };
   
@@ -250,7 +258,7 @@ export default function ProviderDashboard() {
     try {
       const r = await fetch(`${API}/api/fraud/alerts/acknowledge`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify({ alert_id: alertId })
       });
       const d = await r.json();
@@ -283,7 +291,7 @@ export default function ProviderDashboard() {
     try {
       const r = await fetch(`${API}/api/explain-transaction`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify({
           phone_number: alert.phone_number || alert.phone,
           amount      : alert.amount || 0,
@@ -311,38 +319,21 @@ export default function ProviderDashboard() {
     setLookupLoading(true);
     setLookupTransactions([]);
     setLookupFraudAlerts([]);
+    // Strip any existing +250 or 250 prefix before prepending, to avoid double prefix
+    const cleanPhone = lookupPhone.replace(/^\+?250/, '');
     try {
       const r = await fetch(`${API}/api/admin/user-lookup`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone_number: '+250' + lookupPhone })
+        headers: authHeaders(),
+        body: JSON.stringify({ phone_number: '+250' + cleanPhone })
       });
       const d = await r.json();
       if (d.success) {
         showAlert(setLookupMsg, 'User found successfully', 'success');
         setLookupResult(d.user);
-
-        // Fetch transaction history
-        try {
-          const tr = await fetch(`${API}/api/admin/user-transactions`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phone_number: '+250' + lookupPhone })
-          });
-          const td = await tr.json();
-          if (td.success) setLookupTransactions(td.transactions || []);
-        } catch {}
-
-        // Fetch fraud alerts for this user
-        try {
-          const fr = await fetch(`${API}/api/admin/user-fraud-alerts`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phone_number: '+250' + lookupPhone })
-          });
-          const fd = await fr.json();
-          if (fd.success) setLookupFraudAlerts(fd.alerts || []);
-        } catch {}
+        // Use embedded data from the lookup response instead of separate broken routes
+        setLookupTransactions(d.user?.transactions || []);
+        setLookupFraudAlerts(d.user?.alerts || []);
 
       } else {
         showAlert(setLookupMsg, d.error || 'User not found', 'error');
@@ -363,7 +354,7 @@ export default function ProviderDashboard() {
     try {
       const r = await fetch(`${API}/api/admin/travel/register`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify({
           phone_number: '+250' + travelPhone,
           departure_date: travelDepart,
@@ -390,7 +381,7 @@ export default function ProviderDashboard() {
     try {
       const r = await fetch(`${API}/api/admin/travel/reactivate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify({ phone_number: '+250' + reactPhone })
       });
       const d = await r.json();
@@ -409,7 +400,7 @@ export default function ProviderDashboard() {
     try {
       const r = await fetch(`${API}/api/admin/travel/status`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify({ phone_number: '+250' + checkTravelPhone })
       });
       const d = await r.json();
@@ -450,8 +441,8 @@ export default function ProviderDashboard() {
           <NavItem page="alerts" icon={AlertTriangle} label="Fraud Alerts" badge={stats.unacked_alerts > 0 ? stats.unacked_alerts : null} activePage={activePage} onNavigate={(p) => { setActivePage(p); loadAlerts(); }} />
           
           <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3.5 py-3.5 pb-1.5">User Management</div>
-          <NavItem page="user-lookup" icon={Search} label="User Lookup" activePage={activePage} onNavigate={setActivePage} />
-          <NavItem page="users" icon={Users} label="All Users" activePage={activePage} onNavigate={(p) => { setActivePage(p); loadUsers(); }} />
+          <NavItem page="user-lookup" icon={Search} label="Customer Lookup" activePage={activePage} onNavigate={setActivePage} />
+          <NavItem page="users" icon={Users} label="All Customers" activePage={activePage} onNavigate={(p) => { setActivePage(p); loadUsers(); }} />
           
           <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3.5 py-3.5 pb-1.5">Admin Functions</div>
           <NavItem page="travel" icon={Send} label="Travel Control" activePage={activePage} onNavigate={setActivePage} />
@@ -468,17 +459,20 @@ export default function ProviderDashboard() {
         {/* Overview Page */}
         {activePage === 'overview' && (
           <div>
-            <div className="mb-6 text-center">
-              <h1 className="text-2xl font-bold text-slate-900">
-                System Overview
-              </h1>
-              <p className="mt-1 text-sm text-slate-600">Real-time fraud protection statistics</p>
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h1 className="text-2xl font-bold text-slate-900">System Overview</h1>
+                <p className="mt-1 text-sm text-slate-600">Real-time fraud protection statistics</p>
+              </div>
+              <Button variant="ghost" onClick={() => { loadStats(); loadAlerts(true); }} className="flex items-center gap-1.5">
+                <RefreshCw className="w-3.5 h-3.5" /> Refresh
+              </Button>
             </div>
             
             <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-5 mb-6">
-              <StatCard value={stats.total_users ?? '—'} label="Total Users" />
-              <StatCard value={stats.active_users ?? '—'} label="Active Users" />
-              <StatCard value={stats.users_abroad ?? '—'} label="Users Abroad" />
+              <StatCard value={stats.total_users ?? '—'} label="Total Customers" />
+              <StatCard value={stats.active_users ?? '—'} label="Active Customers" />
+              <StatCard value={stats.users_abroad ?? '—'} label="Customers Abroad" />
               <StatCard value={stats.transfers_today ?? '—'} label="Transfers Today" />
               <StatCard value={stats.fraud_blocked_7d ?? '—'} label="Fraud Blocked (7d)" />
               <StatCard value={(stats.fraud_rate_7d ?? '—') + '%'} label="Fraud Rate (7d)" />
@@ -507,7 +501,7 @@ export default function ProviderDashboard() {
                             'bg-emerald-500'
                           }`} />
                           <div className="flex-1 min-w-0">
-                            <div className="text-sm text-slate-800">{alert.message || '—'}</div>
+                            <div className="text-sm font-medium text-slate-800">{alert.message || '—'}</div>
                             <div className="text-[11px] text-slate-500 mt-1 font-mono">
                               {fmtDate(alert.created_at)} | Score: {((alert.fraud_score || 0) * 100).toFixed(1)}% | {alert.action || '—'}
                             </div>
@@ -559,7 +553,7 @@ export default function ProviderDashboard() {
         lookupTransactions.map((tx, i) => {
           const isSent = tx.sender_phone === ('+250' + lookupPhone);
           return (
-            <div key={tx.id ?? i} className="flex items-center gap-3 p-4 text-xs border-b border-slate-200">
+            <div key={tx.id ?? i} className="flex items-center gap-3 p-4 text-sm border-b border-slate-200">
               <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
                 isSent ? 'bg-rose-500/10 text-rose-500' : 'bg-emerald-100 text-emerald-700 border border-emerald-300'
               }`}>
@@ -682,7 +676,7 @@ export default function ProviderDashboard() {
                           'bg-emerald-500'
                         }`} />
                         <div className="flex-1 min-w-0">
-                          <div className="text-sm text-slate-800">{alert.message || '—'}</div>
+                          <div className="text-sm font-medium text-slate-800">{alert.message || '—'}</div>
                           <div className="text-[11px] text-slate-500 mt-1 font-mono">
                             {fmtDate(alert.created_at)} | Score: {((alert.fraud_score || 0) * 100).toFixed(1)}% | {alert.action || '—'}
                           </div>
@@ -727,7 +721,7 @@ export default function ProviderDashboard() {
       <h1 className="text-2xl font-bold text-slate-900">
         User Lookup
       </h1>
-      <p className="mt-1 text-sm text-slate-600">Search user by phone number</p>
+      <p className="mt-1 text-sm text-slate-600">Search customer by phone number</p>
     </div>
     
     <div className="max-w-[600px] mx-auto">
@@ -741,7 +735,7 @@ export default function ProviderDashboard() {
         <div className="p-6">
           <AlertMsg msg={lookupMsg} />
           <div className="mb-5">
-            <label className="block text-xs font-semibold text-slate-900 mb-1.5">User Phone Number</label>
+            <label className="block text-xs font-semibold text-slate-900 mb-1.5">Customer Phone Number</label>
             <div className="flex items-center border rounded-lg border-slate-300 bg-slate-50 focus-within:border-emerald-500 focus-within:ring-3 focus-within:ring-emerald-500/10">
               <span className="px-3.5 py-2.5 text-slate-500 font-mono text-sm border-r border-slate-300">+250</span>
               <input
@@ -767,7 +761,7 @@ export default function ProviderDashboard() {
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-sky-500 flex items-center justify-center mb-2.5">
               <Users className="w-5 h-5 text-white" />
             </div>
-            <h2 className="text-base font-bold text-slate-800">User Details</h2>
+            <h2 className="text-base font-bold text-slate-800">Customer Details</h2>
           </div>
           <div className="p-6">
             <div className="flex justify-between py-3 text-xs border-b border-slate-200">
@@ -812,7 +806,7 @@ export default function ProviderDashboard() {
               lookupTransactions.map((tx, i) => {
                 const isSent = tx.sender_phone === ('+250' + lookupPhone);
                 return (
-                  <div key={tx.id ?? i} className="flex items-center gap-3 p-4 text-xs border-b border-slate-200">
+                  <div key={tx.id ?? i} className="flex items-center gap-3 p-4 text-sm border-b border-slate-200">
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
                       isSent ? 'bg-rose-500/10 text-rose-500' : 'bg-emerald-100 text-emerald-700 border border-emerald-300'
                     }`}>
@@ -851,7 +845,7 @@ export default function ProviderDashboard() {
           </div>
           <div className="p-0">
             {lookupFraudAlerts.length === 0 ? (
-              <div className="p-8 text-sm text-center text-slate-500">No fraud alerts for this user</div>
+              <div className="p-8 text-sm text-center text-slate-500">No fraud alerts for this customer</div>
             ) : (
               lookupFraudAlerts.map((alert, i) => (
                 <div key={alert.id ?? i} className="flex items-start gap-3 p-4 border-b border-slate-200">
@@ -883,33 +877,35 @@ export default function ProviderDashboard() {
   </div>
 )}
         
-        {/* All Users Page */}
+        {/* All Customers Page */}
         {activePage === 'users' && (
           <div>
             <div className="mb-6 text-center">
               <h1 className="text-2xl font-bold text-slate-900">
-                All Users
+                All Customers
               </h1>
-              <p className="mt-1 text-sm text-slate-600">System user management</p>
+              <p className="mt-1 text-sm text-slate-600">Customer management</p>
             </div>
             <Card>
               <div className="flex flex-col items-center p-6 text-center border-b border-slate-300">
                 <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500 to-sky-500 flex items-center justify-center mb-2.5">
                   <Users className="w-5 h-5 text-white" />
                 </div>
-                <h2 className="text-base font-bold text-slate-800">User Registry</h2>
+                <h2 className="text-base font-bold text-slate-800">Customer Registry</h2>
               </div>
               <div className="p-0">
-                {users.length === 0 ? (
+                {!usersLoaded ? (
                   <div className="p-10 text-sm text-center text-slate-500">Loading customers...</div>
+                ) : users.length === 0 ? (
+                  <div className="p-10 text-sm text-center text-slate-500">No customers found.</div>
                 ) : (
                   users.map((user) => (
-                    <div key={user.phone_number} className="flex items-center justify-between p-4 text-xs border-b border-slate-200 hover:bg-slate-50 transition-colors">
+                    <div key={user.phone_number} className="flex items-center justify-between p-4 text-sm transition-colors border-b border-slate-200 hover:bg-slate-50">
                       <div>
                         <div className="font-semibold text-slate-900">{user.full_name || '—'}</div>
                         <div className="font-mono text-slate-500 mt-0.5">{user.phone_number || '—'}</div>
                       </div>
-                      <div className="text-right flex flex-col items-end gap-1">
+                      <div className="flex flex-col items-end gap-1 text-right">
                         <div className="font-mono font-bold text-emerald-700">{fmtRWF(user.account_balance || 0)}</div>
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
                           user.is_active ? 'bg-emerald-100 text-emerald-700 border-emerald-300' : 'bg-rose-100 text-rose-700 border-rose-300'
@@ -930,7 +926,7 @@ export default function ProviderDashboard() {
               <h1 className="text-2xl font-bold text-slate-900">
                 Travel Control
               </h1>
-              <p className="mt-1 text-sm text-slate-600">Manage user travel registrations and SIM blocking</p>
+              <p className="mt-1 text-sm text-slate-600">Manage customer travel registrations and SIM blocking</p>
             </div>
             
             <div className="grid grid-cols-2 gap-6">
@@ -940,7 +936,7 @@ export default function ProviderDashboard() {
                     <Send className="w-5 h-5 text-white" />
                   </div>
                   <h2 className="text-base font-bold text-slate-800">Register Travel</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Block SIM when user travels abroad</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Block SIM when customer travels abroad</p>
                 </div>
                 <div className="p-6">
                   <AlertMsg msg={travelMsg} />
@@ -964,6 +960,7 @@ export default function ProviderDashboard() {
                       <input
                         type="date"
                         value={travelDepart}
+                        min={minDate}
                         onChange={(e) => setTravelDepart(e.target.value)}
                         className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg bg-slate-50 text-sm focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/10 outline-none"
                       />
@@ -973,6 +970,7 @@ export default function ProviderDashboard() {
                       <input
                         type="date"
                         value={travelReturn}
+                        min={travelDepart || minDate}
                         onChange={(e) => setTravelReturn(e.target.value)}
                         className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg bg-slate-50 text-sm focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/10 outline-none"
                       />
@@ -1001,7 +999,7 @@ export default function ProviderDashboard() {
                     <RefreshCw className="w-5 h-5 text-white" />
                   </div>
                   <h2 className="text-base font-bold text-slate-800">Reactivate on Return</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Re-enable transfers after user returns</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Re-enable transfers after customer returns</p>
                 </div>
                 <div className="p-6">
                   <AlertMsg msg={reactMsg} />
@@ -1040,7 +1038,7 @@ export default function ProviderDashboard() {
                   </div>
                   <Button variant="ghost" onClick={checkTravel} className="justify-center w-full">Check Status</Button>
                   {travelStatus && (
-                    <div className="mt-3 p-3 rounded-xl text-xs bg-sky-50 text-sky-800 border border-sky-200 space-y-1">
+                    <div className="p-3 mt-3 space-y-1 text-xs border rounded-xl bg-sky-50 text-sky-800 border-sky-200">
                       {travelStatus.destination_country && <div><span className="font-semibold">Destination:</span> {travelStatus.destination_country}</div>}
                       {travelStatus.departure_date && <div><span className="font-semibold">Departed:</span> {fmtDate(travelStatus.departure_date)}</div>}
                       {travelStatus.return_date && <div><span className="font-semibold">Returns:</span> {fmtDate(travelStatus.return_date)}</div>}
