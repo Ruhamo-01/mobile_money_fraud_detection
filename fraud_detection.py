@@ -119,6 +119,29 @@ class UserRegistrationSystem:
         except Exception:
             pass
 
+        # Safe migration: add travel_status column if missing
+        # 'active' = normal, 'abroad' = registered as travelling (replaces is_active=FALSE)
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS travel_status TEXT DEFAULT 'active'")
+        except Exception:
+            pass
+
+        # Migrate existing abroad users: anyone with is_active=FALSE and an active travel record
+        # should have travel_status='abroad' and is_active restored to TRUE
+        try:
+            c.execute("""
+                UPDATE users SET travel_status = 'abroad', is_active = TRUE
+                WHERE is_active = FALSE
+                  AND phone_number IN (
+                      SELECT user_phone FROM travel_records
+                      WHERE sim_deactivated = TRUE
+                        AND date(return_date) >= CURRENT_DATE
+                  )
+                  AND (travel_status IS NULL OR travel_status = 'active')
+            """)
+        except Exception:
+            pass
+
         conn.commit()
         c.close()
         conn.close()
@@ -626,9 +649,11 @@ class UserRegistrationSystem:
 
             if not verified:
                 if match_file is not None and match_db and not match_file:
-                    result["error"] = "Face matched database but not saved image -- possible tampering detected."
+                    # Matched DB encoding but not the saved file — possible tampering
+                    result["error"] = "Face matched database but could not be confirmed against saved image. Please contact support."
                 elif not match_db:
-                    result["error"] = "Face does not match registered identity. Verification failed."
+                    # Face was successfully scanned and compared but does not match the registered owner
+                    result["error"] = "Transaction failed because you are not the owner of this account."
 
             return result
 
@@ -746,7 +771,8 @@ class UserRegistrationSystem:
         c.execute('''
             SELECT phone_number, full_name, national_id, email,
                    registration_date, is_active, verification_status,
-                   account_balance, gender
+                   account_balance, gender,
+                   COALESCE(travel_status, 'active') AS travel_status
             FROM users WHERE phone_number = %s
         ''', (phone_number,))
         row = c.fetchone()
@@ -763,6 +789,7 @@ class UserRegistrationSystem:
             "verification_status": row[6],
             "account_balance"    : row[7],
             "gender"             : row[8],
+            "travel_status"      : row[9],   # 'active' | 'abroad'
         }
 
     def has_face_registered(self, phone_number: str) -> bool:
@@ -821,13 +848,15 @@ class TravelMonitoringSystem:
                 (user_phone, departure_date, return_date, destination_country, sim_deactivated)
                 VALUES (%s, %s, %s, %s, TRUE)
             ''', (phone_number, departure_date, return_date, destination_country))
-            c.execute("UPDATE users SET is_active = FALSE WHERE phone_number = %s",
+            # Set travel_status to 'abroad' — do NOT set is_active=FALSE so the
+            # account is not treated as deactivated, just flagged as abroad.
+            c.execute("UPDATE users SET travel_status = 'abroad' WHERE phone_number = %s",
                       (phone_number,))
             conn.commit()
             return {
                 "success": True,
-                "message": (f"Travel registered. Money transfers blocked for "
-                            f"{phone_number} until {return_date}. "
+                "message": (f"Travel registered. Transfers for "
+                            f"{phone_number} will require face verification until {return_date}. "
                             f"Destination: {destination_country}.")
             }
         except Exception as e:
@@ -858,11 +887,11 @@ class TravelMonitoringSystem:
                     SET sim_deactivated = FALSE, return_date = %s
                     WHERE id = %s
                 ''', (yesterday, row[0]))
-                c.execute("UPDATE users SET is_active = TRUE WHERE phone_number = %s",
+                c.execute("UPDATE users SET travel_status = 'active' WHERE phone_number = %s",
                           (phone_number,))
                 conn.commit()
                 return {"success": True,
-                        "message": "SIM reactivated. Transfers enabled."}
+                        "message": "SIM reactivated. Transfers re-enabled."}
             return {"success": False,
                     "error": "No travel record found for this user."}
         except Exception as e:
@@ -871,11 +900,19 @@ class TravelMonitoringSystem:
             conn.close()
 
     def is_user_abroad(self, phone_number: str) -> bool:
-        """Return True only if travel record is active AND sim is still deactivated.
-        FIX: Use date() comparison and also check sim_deactivated=1.
-        """
+        """Return True if the user has travel_status = 'abroad' OR has an active travel record."""
         conn = self.get_connection()
         c = conn.cursor()
+        # First check the fast travel_status column
+        try:
+            c.execute("SELECT travel_status FROM users WHERE phone_number = %s", (phone_number,))
+            row = c.fetchone()
+            if row and row[0] == 'abroad':
+                conn.close()
+                return True
+        except Exception:
+            pass
+        # Fallback: check travel_records directly (handles legacy data)
         today = datetime.now().strftime('%Y-%m-%d')
         c.execute('''
             SELECT id FROM travel_records
@@ -1774,10 +1811,11 @@ class RealTimeFraudDetector:
                            "message": "User not found."})
             return result
         if not user["is_active"]:
+            # Genuine deactivation — block immediately
             checks["user"] = {"passed": False, "msg": "Account inactive"}
             result.update({"action": "BLOCK", "risk_level": "HIGH",
-                           "message": "Account is inactive. If you are abroad, "
-                                      "please contact your service provider to reactivate."})
+                           "message": "Your account is currently inactive. "
+                                      "Please contact your service provider to reactivate."})
             return result
         checks["user"] = {"passed": True, "msg": f"Active user: {user['full_name']}"}
 
@@ -1787,19 +1825,54 @@ class RealTimeFraudDetector:
         checks["balance_multiplier"] = {"passed": True, "msg": "Delegated to ML model"}
 
         #  3. Travel check 
-        if self.travel_sys.is_user_abroad(phone_number):
-            checks["travel"] = {"passed": False,
-                                 "msg": "User is registered as abroad -- transfers blocked."}
-            result.update({"action": "BLOCK", "risk_level": "HIGH",
-                           "message": "Transaction blocked: your SIM is deactivated for "
-                                      "international travel. Please contact your service "
-                                      "provider when you return."})
-            self.alert_sys.raise_alert(
-                phone_number, amount, 1.0, "HIGH", "BLOCK",
-                "Attempted transfer while registered abroad.")
-            result["alert"] = True
-            return result
-        checks["travel"] = {"passed": True, "msg": "User is in country"}
+        # Users with travel_status='abroad' are NOT blocked — they require mandatory
+        # face verification plus an email notification.
+        is_abroad = (user.get("travel_status") == "abroad") or self.travel_sys.is_user_abroad(phone_number)
+        if is_abroad:
+            checks["travel"] = {
+                "passed": False,
+                "msg": "User is registered as abroad — face verification required."
+            }
+            # If no face provided yet, require it (with email notification handled in money_transfer.py)
+            if not face_base64:
+                result.update({
+                    "action"    : "REQUIRE_FACE",
+                    "risk_level": "HIGH",
+                    "message"   : (
+                        "Your account is registered as abroad. "
+                        "For your security, please verify your face to continue this transfer. "
+                        "A notification has been sent to your registered email address."
+                    ),
+                    "travel_abroad": True,
+                })
+                self.alert_sys.raise_alert(
+                    phone_number, amount, 1.0, "HIGH", "REQUIRE_FACE",
+                    "Transfer attempted while registered abroad — face verification required.")
+                result["alert"] = True
+                return result
+            # Face was provided — verify it before continuing
+            face_result = self.user_reg.verify_face_from_base64(phone_number, face_base64)
+            result["face_verified"] = face_result.get("verified", False)
+            checks["face_travel"] = face_result
+            if not result["face_verified"]:
+                face_error = face_result.get("error", "Transaction failed because you are not the owner of this account.")
+                result.update({
+                    "action"    : "BLOCK",
+                    "risk_level": "HIGH",
+                    "message"   : face_error,
+                })
+                self.alert_sys.raise_alert(
+                    phone_number, amount, 1.0, "HIGH", "BLOCK",
+                    f"Face verification failed on abroad transfer attempt — {face_error}")
+                result["alert"] = True
+                return result
+            # Face matched — mark as verified and continue to ML scoring
+            checks["travel"] = {
+                "passed": True,
+                "msg"   : "Abroad user — identity confirmed via face verification."
+            }
+        else:
+            checks["travel"] = {"passed": True, "msg": "User is in country"}
 
         #  4. ML model score -- SOLE fraud decision 
         #   Build features ONCE and reuse for both ML scoring and behavioural override.
@@ -1912,23 +1985,25 @@ class RealTimeFraudDetector:
                 )
             }
 
-        #  8. Face verification gate 
-        if result["risk_level"] in ("HIGH", "MEDIUM"):
-            if face_base64:
-                # User has provided face image -- verify it
+        #  8. Face verification gate — required for ALL transfers 
+        # Every transfer requires face verification regardless of risk level.
+        # This ensures identity is confirmed on every transaction.
+        # For LOW risk: simple face gate with no fraud alert raised.
+        # For MEDIUM/HIGH risk: face gate + fraud alert.
+        if face_base64:
+            # User has provided face image — verify it
+            # Skip re-verification if already verified above (abroad check)
+            if result.get("face_verified") is True:
+                # Already verified in the abroad check above — just confirm
+                result["action"]  = "ALLOW"
+                result["message"] = "Face verification passed. Transaction approved."
+            else:
                 face_result = self.user_reg.verify_face_from_base64(
                     phone_number, face_base64)
                 result["face_verified"] = face_result.get("verified", False)
                 checks["face"] = face_result
 
                 if result["face_verified"]:
-                    # Face match = identity confirmed = ALLOW always.
-                    # The face is the ultimate proof of identity. If the person
-                    # in front of the camera matches the registered face, we trust
-                    # them regardless of ML score, velocity, or risk level.
-                    # Velocity and ML signals only block when we CANNOT confirm
-                    # who is making the transaction. Face mismatch keeps full
-                    # blocking (see else branch below).
                     extra = (
                         " Your previous over-balance attempt has been cleared."
                         if untrusted else ""
@@ -1937,15 +2012,16 @@ class RealTimeFraudDetector:
                     result["action"]     = "ALLOW"
                     result["message"]    = f"Face verification passed. Transaction approved.{extra}"
                 else:
-                    # Face failed
                     result["action"]  = "BLOCK"
-                    result["message"] = ("Face verification failed. "
-                                         "Transaction blocked for your security.")
-                    # Close the pending REQUIRE_FACE alert and update it instead of creating a new one
+                    # Use the specific error from the face verification — it already
+                    # says "not the owner" when the face doesn't match, and gives
+                    # technical detail for other failures (corrupted encoding, etc.)
+                    face_error = face_result.get("error", "Face verification failed. Transaction blocked for your security.")
+                    result["message"] = face_error
                     pending_id = result.get("_alert_id")
                     if pending_id:
                         self.alert_sys.update_alert(pending_id, "BLOCK",
-                            "Face verification failed -- identity could not be confirmed.")
+                            f"Face verification failed — {face_error}")
                     else:
                         reason = _build_fraud_reason(phone_number, amount, ml_s, self.db_config)
                         try:
@@ -1955,29 +2031,35 @@ class RealTimeFraudDetector:
                         result["alert"] = self.alert_sys.raise_alert(
                             phone_number, amount, combined,
                             "HIGH", "BLOCK",
-                            f"{reason}. Face verification failed -- identity not confirmed.",
+                            f"{reason}. {face_error}",
                             explanation=xai)
                     result["face_failed"] = True
+        else:
+            # No face provided yet — always require it (every transfer needs face verification)
+            if untrusted and result["risk_level"] == "MEDIUM":
+                face_msg = (
+                    "A previous transfer attempt exceeded your account balance. "
+                    "For your security, please verify your face to continue."
+                )
+            elif result["risk_level"] == "HIGH":
+                face_msg = (
+                    "High fraud risk detected. Face verification required before transfer."
+                )
+            elif result["risk_level"] == "MEDIUM":
+                face_msg = (
+                    "Unusual activity detected on this transaction. "
+                    "Please complete face verification to proceed."
+                )
             else:
-                # No face provided yet -- ask for it
-                if untrusted and result["risk_level"] == "MEDIUM":
-                    face_msg = (
-                        "A previous transfer attempt exceeded your account balance. "
-                        "For your security, please verify your face to continue."
-                    )
-                elif result["risk_level"] == "MEDIUM":
-                    face_msg = (
-                        "Unusual activity detected on this transaction. "
-                        "Please complete face verification to proceed."
-                    )
-                else:
-                    face_msg = (
-                        "High fraud risk detected. Face verification required before transfer."
-                    )
-                result["action"]  = "REQUIRE_FACE"
-                result["message"] = face_msg
-                # Raise a service-provider alert -- capture explanation NOW
-                # so the dashboard shows the correct context, not a re-score later
+                # LOW risk — face still required on every transfer
+                face_msg = (
+                    "Face verification is required to confirm your identity "
+                    "before this transfer can proceed."
+                )
+            result["action"]  = "REQUIRE_FACE"
+            result["message"] = face_msg
+            # Only raise a fraud alert for MEDIUM/HIGH risk transfers
+            if result["risk_level"] in ("MEDIUM", "HIGH"):
                 reason = _build_fraud_reason(phone_number, amount, ml_s, self.db_config)
                 try:
                     xai = self.explain_transaction(phone_number, amount, network)
@@ -1988,9 +2070,6 @@ class RealTimeFraudDetector:
                     result["risk_level"], "REQUIRE_FACE",
                     reason, explanation=xai)
                 result["_alert_id"] = result["alert"].get("alert_id") if result["alert"] else None
-        else:
-            result["action"]  = "ALLOW"
-            result["message"] = "Transaction approved."
 
         return result
 

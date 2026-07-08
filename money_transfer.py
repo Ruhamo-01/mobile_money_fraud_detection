@@ -244,7 +244,9 @@ class MoneyTransferSystem:
             return {"success": False,
                     "error": "Session expired. Please log in again."}
 
-        #  1b. Travel / SIM block check (sender) 
+        #  1b. Travel / SIM check (sender) 
+        # Users abroad: store a pending transfer token, send email with verification link.
+        # The transfer only completes after the user clicks the link and verifies their face.
         try:
             conn = self.get_connection()
             c = conn.cursor()
@@ -257,20 +259,81 @@ class MoneyTransferSystem:
                 ORDER BY id DESC LIMIT 1
             ''', (user["phone"], today, today))
             travel_row = c.fetchone()
+            c.execute("SELECT email, full_name FROM users WHERE phone_number = %s", (user["phone"],))
+            user_info = c.fetchone()
             conn.close()
-            if travel_row:
-                return {
-                    "success": False,
-                    "action": "BLOCK",
-                    "error": (
-                        f"Your SIM is blocked while you are abroad in "
-                        f"{travel_row[0]}. Transfers are disabled until your "
-                        f"return on {travel_row[1]}. "
-                        f"Contact your service provider if you are already back."
-                    )
-                }
-        except Exception:
-            pass
+
+            if travel_row and not face_base64:
+                # No face yet — store pending transfer and send email with link
+                if user_info:
+                    user_email, user_name = user_info
+                    import secrets as _secrets
+                    verify_token = _secrets.token_urlsafe(32)
+                    frontend_url = __import__('os').environ.get("FRONTEND_URL", "http://localhost:5173")
+                    verify_link  = f"{frontend_url}/verify-abroad?token={verify_token}"
+
+                    # Store the pending transfer — expires in 30 minutes
+                    try:
+                        conn2 = self.get_connection()
+                        c2 = conn2.cursor()
+                        c2.execute("""
+                            INSERT INTO pending_abroad_transfers
+                            (token, session_token, phone_number, recipient_phone,
+                             amount, network, destination, expires_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s,
+                                    NOW() + INTERVAL '30 minutes')
+                        """, (verify_token, session_token, user["phone"],
+                              recipient_phone, amount,
+                              self._validate_recipient(recipient_phone).get("network", "MTN"),
+                              travel_row[0]))
+                        conn2.commit()
+                        conn2.close()
+                    except Exception as db_err:
+                        print(f"[Travel] Failed to store pending transfer: {db_err}")
+
+                    # Send email with the verification link.
+                    # The link is embedded in the message body so it appears
+                    # regardless of whether the EmailJS template has a
+                    # {{verification_link}} variable configured.
+                    try:
+                        from auth_system import _send_email
+                        _send_email(
+                            to_email          = user_email,
+                            subject           = "MoMo Shield — Complete Your Transfer (Face Verification Required)",
+                            html_body         = "",
+                            name              = user_name,
+                            phone             = user["phone"],
+                            verification_link = verify_link,
+                            message_text      = (
+                                f"Hi {user_name},\n\n"
+                                f"You initiated a transfer of {amount:,.0f} RWF while your account "
+                                f"is registered as travelling abroad in {travel_row[0]}.\n\n"
+                                f"To complete this transfer, please verify your face by opening this link:\n\n"
+                                f"{verify_link}\n\n"
+                                f"This link expires in 30 minutes. "
+                                f"Open it on any device with a camera.\n\n"
+                                f"If you did NOT initiate this transfer, contact support immediately.\n\n"
+                                f"MoMo Shield — Rwanda Mobile Money Protection"
+                            )
+                        )
+                        print(f"[Travel] ✅ Abroad verification email sent to {user_email}")
+                    except Exception as email_err:
+                        print(f"[Travel] ❌ Failed to send abroad email to {user_email}: {email_err}")
+
+                    return {
+                        "success"      : False,
+                        "action"       : "REQUIRE_FACE",
+                        "travel_abroad": True,
+                        "face_required": True,
+                        "verify_link"  : verify_link,
+                        "message"      : (
+                            f"Your account is registered as abroad in {travel_row[0]}. "
+                            f"A face verification link has been sent to your registered email address. "
+                            f"Click the link in your email to complete this transfer."
+                        ),
+                    }
+        except Exception as travel_err:
+            print(f"[Travel] Travel check error: {travel_err}")
 
         #  2. Recipient validation 
         recipient = self._validate_recipient(recipient_phone)
@@ -286,7 +349,9 @@ class MoneyTransferSystem:
                 "error": "You cannot send money to yourself."
             }
 
-        #  2b. Recipient travel block check 
+        #  2b. Recipient travel check — inform sender but do not block 
+        # If the recipient is abroad, the sender is notified but the transfer
+        # is still allowed (recipient may have international roaming enabled).
         try:
             _today = datetime.now().date().isoformat()
             _conn = self.get_connection()
@@ -300,16 +365,7 @@ class MoneyTransferSystem:
             """, (recipient["phone"], _today, _today))
             _rec_travel = _c.fetchone()
             _conn.close()
-            if _rec_travel:
-                return {
-                    "success": False,
-                    "action": "BLOCK",
-                    "error": (
-                        f"This recipient is currently abroad in {_rec_travel[0]} "
-                        f"and cannot receive transfers until {_rec_travel[1]}. "
-                        f"Their SIM is blocked for travel security."
-                    )
-                }
+            # No longer blocking — recipient abroad is noted but transfer continues
         except Exception:
             pass
 

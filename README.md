@@ -1,6 +1,106 @@
-# MoMo Shield — ML-Powered Mobile Money Fraud Detection
+# MoMo Shield — Mobile Money Fraud Detection System
 
-A full-stack fraud detection system for Rwanda's mobile money ecosystem (MTN & Airtel), combining an XGBoost ML model, biometric face verification, PIN security, and travel SIM control.
+Real-time fraud detection for Rwanda mobile money (MTN & Airtel) combining XGBoost ML, biometric face verification, and Explainable AI.
+
+---
+
+## Prerequisites
+
+- **Python 3.11+**
+- **Node.js 18+**
+- **PostgreSQL 14+**
+- **Visual Studio Build Tools** (Windows) — required to build `dlib` / `face-recognition`
+  → https://visualstudio.microsoft.com/visual-cpp-build-tools/
+
+---
+
+## Setup
+
+### 1. Clone the repository
+
+```bash
+git clone <your-repo-url>
+cd mobile_money_fraud_detection
+```
+
+### 2. Create and activate a Python virtual environment
+
+```bash
+python -m venv .venv
+
+# Windows
+.venv\Scripts\activate
+
+# Mac/Linux
+source .venv/bin/activate
+```
+
+### 3. Install Python dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+> **Note:** If `dlib` fails to build on Windows, install Visual Studio Build Tools (C++ workload) first, then retry.
+
+### 4. Create the PostgreSQL database
+
+```sql
+CREATE DATABASE momo_fraud;
+```
+
+### 5. Configure environment variables
+
+```bash
+copy .env.example .env   # Windows
+cp .env.example .env     # Mac/Linux
+```
+
+Edit `.env` and set your PostgreSQL credentials:
+
+```env
+DB_NAME=momo_fraud
+DB_USER=postgres
+DB_PASSWORD=your_postgres_password
+DB_HOST=localhost
+DB_PORT=5432
+FRONTEND_URL=http://localhost:5173
+```
+
+### 6. Install frontend dependencies
+
+```bash
+cd frontend
+npm install
+cd ..
+```
+
+### 7. Run the system
+
+Open **two terminals**:
+
+**Terminal 1 — Backend:**
+```bash
+python app.py
+```
+
+**Terminal 2 — Frontend:**
+```bash
+cd frontend
+npm run dev
+```
+
+Open **http://localhost:5173** in your browser.
+
+---
+
+## Creating an Admin Account
+
+The system creates all tables automatically on first run. Register a customer account through the UI, then promote it to admin directly in PostgreSQL:
+
+```sql
+UPDATE users SET role = 'admin' WHERE email = 'your@email.com';
+```
 
 ---
 
@@ -8,113 +108,56 @@ A full-stack fraud detection system for Rwanda's mobile money ecosystem (MTN & A
 
 | Layer | Technology |
 |---|---|
-| Backend | Python 3.14, Flask, PostgreSQL |
-| ML Model | XGBoost (97.28% AUC, 20 features) |
-| Face Recognition | `face_recognition` + `dlib` |
-| Frontend | React 18, Vite, Tailwind CSS |
-
----
-
-## Requirements
-
-- Python 3.10+ (tested on 3.14)
-- PostgreSQL 14+
-- Node.js 18+
-- `pg_dump` in PATH (for database backup)
-
----
-
-## Setup
-
-### 1. Clone and create virtual environment
-
-```bash
-python -m venv .venv
-.venv\Scripts\activate        # Windows
-source .venv/bin/activate     # Linux/Mac
-pip install -r requirements.txt
-```
-
-### 2. Database
-
-Create the database and run the schema:
-
-```bash
-psql -U postgres -c "CREATE DATABASE momo_fraud;"
-psql -U postgres -d momo_fraud -f momo_fraud.sql
-```
-
-### 3. ML Model
-
-The trained model files (`fraud_best_model.pkl`, `fraud_scaler.pkl`, `fraud_config.json`) must be present in the project root. To retrain:
-
-```bash
-python run_system.py --train
-```
-
-### 4. Start the backend
-
-```bash
-python app.py
-# API runs on http://localhost:5000
-```
-
-### 5. Start the frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-# UI runs on http://localhost:5173
-```
-
----
-
-## Roles & Default Accounts
-
-| Role | Email | Notes |
-|---|---|---|
-| Admin | `admin@admin.com` | Full system control |
-| Manager | `provider@provider.com` | Fraud monitoring, travel control |
-| Customer | Register via UI | Send money, face verification |
-
----
-
-## Key API Endpoints
-
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/api/register` | Register customer with face |
-| POST | `/api/login` | Login (all roles) |
-| POST | `/api/transfer` | Initiate ML-scored transfer |
-| POST | `/api/verify-pin` | Verify transaction PIN |
-| POST | `/api/reset-pin` | Reset PIN via face + National ID |
-| GET  | `/api/health` | System health + ML model status |
-| GET  | `/api/dashboard/stats` | Live system statistics |
-| POST | `/api/admin/settings` | Save system settings to DB |
-| POST | `/api/admin/backup` | Download PostgreSQL backup |
+| Frontend | React 18 + Tailwind CSS + Vite |
+| Backend | Python 3.11 + Flask |
+| Database | PostgreSQL |
+| ML Model | XGBoost (trained in `Momo_Clean.ipynb`) |
+| Face Verification | face_recognition (dlib) |
+| Explainability | SHAP TreeExplainer |
+| Email | EmailJS (no SMTP required) |
 
 ---
 
 ## Project Structure
 
 ```
-├── app.py                  Flask API server (all routes)
-├── auth_system.py          Authentication, sessions, password reset
-├── fraud_detection.py      ML scoring, face verification, travel monitoring
-├── money_transfer.py       Transfer flow with fraud gating
-├── fraud_best_model.pkl    Trained XGBoost model
-├── fraud_scaler.pkl        Feature scaler
-├── fraud_config.json       Model config (threshold, features)
-├── momo_fraud.sql          PostgreSQL schema + seed data
-└── frontend/               React + Vite + Tailwind frontend
-    └── src/
-        ├── components/
-        │   ├── HomePage.jsx
-        │   ├── Login.jsx
-        │   ├── UserDashboard.jsx
-        │   ├── ProviderDashboard.jsx
-        │   ├── AdminDashboard.jsx
-        │   └── ResetPassword.jsx
-        └── utils/helpers.js
+mobile_money_fraud_detection/
+├── app.py                  # Flask backend — 40+ REST endpoints
+├── auth_system.py          # Auth, sessions, PIN, password reset
+├── fraud_detection.py      # ML engine, face verification, XAI, alerts
+├── money_transfer.py       # Transfer pipeline with fraud scoring
+├── run_system.py           # Optional startup helper script
+├── fraud_best_model.pkl    # Trained XGBoost model
+├── fraud_scaler.pkl        # Feature scaler
+├── fraud_config.json       # Model config (threshold, features, metrics)
+├── momo_fraud.sql          # Database schema export
+├── Momo_Clean.ipynb        # Model training notebook
+├── requirements.txt        # Python dependencies
+├── .env                    # Environment variables (not committed)
+├── .env.example            # Environment variable template
+└── frontend/               # React SPA
+    ├── src/
+    │   ├── components/     # Admin, Manager, Customer dashboards
+    │   └── utils/          # emailService.js, helpers.js
+    └── package.json
 ```
+
+---
+
+## Model Performance
+
+| Metric | Value |
+|---|---|
+| ROC-AUC | 0.9728 |
+| Fraud F1 | 0.7223 |
+| Decision Threshold | 0.38 |
+
+Trained on 200,000 synthetic Rwanda-scale transactions.
+
+---
+
+## Author
+
+**RUHAMO Rose** | Reg: 25RP21044  
+RP Huye College · Department of ICT · 2025–2026  
+Supervisor: Mrs. BIZIMANA Judith

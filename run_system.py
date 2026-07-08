@@ -6,9 +6,9 @@ Checks dependencies, verifies ML model files,
 then launches the Flask server.
 
 Usage:
-  python run_system.py            # normal start
-  python run_system.py --train    # retrain model first, then start
-  python run_system.py --check    # check only, do not start server
+  python run_system.py          # normal start
+  python run_system.py --train  # retrain model from Momo_Clean.ipynb first
+  python run_system.py --check  # check only, do not start server
 """
 
 import os
@@ -144,6 +144,8 @@ def check_files() -> bool:
     info("Frontend: React SPA served by Vite on http://localhost:5173")
     info("Backend:  Flask API served on http://localhost:5000")
 
+    info("Email:    Sent via EmailJS — no SMTP configuration required")
+
     return all_ok
 
 
@@ -174,31 +176,14 @@ def check_database() -> bool:
 
 
 # 
-# 4. DATASET CHECK
-# 
-
-def check_dataset():
-    print("\n  Checking training dataset…")
-    if os.path.exists("Fraud.csv"):
-        size = os.path.getsize("Fraud.csv")
-        ok(f"Fraud.csv  ({size/1e6:.1f} MB)")
-        return True
-    else:
-        warn("Fraud.csv not found")
-        info("Download from Kaggle: 'paysim1' synthetic financial dataset")
-        info("Place Fraud.csv in the same folder as this script")
-        return False
-
-
-# 
 # 5. TRAIN MODEL  (called with --train flag)
 # 
 
 def train_model():
     """
-    Execute the Jupyter notebook non-interactively using nbconvert,
-    which runs all cells and saves fraud_best_model.pkl etc.
-    Falls back to a plain Python training script if nbconvert is missing.
+    Execute Momo_Clean.ipynb non-interactively using nbconvert.
+    Runs all cells and saves fraud_best_model.pkl, fraud_scaler.pkl,
+    and fraud_config.json to the project root.
     """
     print("\n  Training ML model from Momo_Clean.ipynb…")
     sep()
@@ -315,35 +300,24 @@ def main():
     sep()
     check_database()
 
-    #  4. Dataset 
-    sep()
-    print("  STEP 4 -- Dataset Check")
-    sep()
-    dataset_ok = check_dataset()
-
-    #  5. Train (optional) 
+    #  4. Train (optional) 
     if args.train:
-        if not dataset_ok:
-            err("Cannot train without Fraud.csv")
-            sys.exit(1)
         sep()
-        print("  STEP 5 -- Model Training")
+        print("  STEP 4 -- Model Training")
         sep()
         train_ok = train_model()
         if not train_ok:
-            warn("Training failed -- server will run in rule-based mode only")
+            warn("Training failed — server will run in rule-based mode only")
 
     #  Model status summary 
     model_loaded = all(os.path.exists(f) for f in MODEL_FILES)
     sep()
     if model_loaded:
-        ok("ML model ready -- full fraud detection enabled")
+        ok("ML model ready — full fraud detection enabled")
     else:
-        warn("ML model NOT found -- running in rule-based fallback mode")
-        info("To train the model:")
-        info("  1. Make sure Fraud.csv is in this folder")
-        info("  2. Run:  python run_system.py --train")
-        info("  OR open Momo_Clean.ipynb in Jupyter and run all cells")
+        warn("ML model NOT found — running in rule-based fallback mode")
+        info("To train the model, open Momo_Clean.ipynb in Jupyter and run all cells,")
+        info("then copy fraud_best_model.pkl, fraud_scaler.pkl, fraud_config.json here.")
 
     #  Check only mode 
     if args.check:
@@ -351,9 +325,9 @@ def main():
         ok("Check complete. Server not started (--check mode).")
         return
 
-    #  6. Start server 
+    #  5. Start server 
     sep()
-    print("  STEP 6 -- Starting Server")
+    print("  STEP 5 -- Starting Server")
     sep()
     start_server()
 

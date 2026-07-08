@@ -6,6 +6,7 @@ import AdminDashboard from './components/AdminDashboard';
 import ProviderDashboard from './components/ProviderDashboard';
 import UserDashboard from './components/UserDashboard';
 import ResetPassword from './components/ResetPassword';
+import AbroadVerify from './components/AbroadVerify';
 
 function App() {
   return (
@@ -17,6 +18,7 @@ function App() {
         <Route path="/provider_dashboard" element={<ProviderDashboard />} />
         <Route path="/user_dashboard" element={<UserDashboard />} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/verify-abroad" element={<AbroadVerify />} />
       </Routes>
     </Router>
   );

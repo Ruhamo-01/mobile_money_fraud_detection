@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Wallet, Send, History, Lock, User, Camera, Check, RefreshCw, LogOut, AlertTriangle, Shield, Activity } from 'lucide-react';
+import { Wallet, Send, History, Lock, User, Camera, Check, RefreshCw, LogOut, AlertTriangle, Shield } from 'lucide-react';
 import { fmtRWF, fmtDate, showAlert } from '../utils/helpers';
+import { sendFaceVerificationEmail, sendTransferBlockedEmail } from '../utils/emailService';
 
 const API = '';
 const TOKEN = () => localStorage.getItem('session_token');
@@ -81,7 +82,6 @@ export default function UserDashboard() {
   const [transferFaceStream, setTransferFaceStream] = useState(null);
   const [faceVerifying, setFaceVerifying] = useState(false);
   const [pendingPinInput, setPendingPinInput] = useState('');
-  const [transferExplanation, setTransferExplanation] = useState(null); // XAI explanation
   
   // Reset PIN state
   const [resetStep, setResetStep] = useState(1);
@@ -318,7 +318,37 @@ export default function UserDashboard() {
         setFee(0);
         loadBalance();
       } else if (d.face_required || d.action === 'REQUIRE_FACE') {
-        // ML flagged this transfer — face verification required
+        // If abroad — send verification link email from frontend, show message
+        if (d.travel_abroad) {
+          setShowPinModal(false);
+          setPinInput('');
+          setPinModalMsg({ show: false, message: '' });
+          // Send from frontend (EmailJS free tier only allows browser calls)
+          sendFaceVerificationEmail({
+            name            : currentUser?.name  || '',
+            email           : currentUser?.email || '',
+            phone           : currentUser?.phone || '',
+            amount          : transferAmount,
+            reason          : `Your account is registered as travelling abroad. `,
+            verificationLink: d.verify_link || '',
+          });
+          showAlert(
+            setTransferMsg,
+            'A face verification link has been sent to your registered email address. Click the link in your email to complete this transfer.',
+            'success'
+          );
+          return;
+        }
+        // Non-abroad — face verification required in app
+        sendFaceVerificationEmail({
+          name  : currentUser?.name  || '',
+          email : currentUser?.email || '',
+          phone : currentUser?.phone || '',
+          amount: transferAmount,
+          reason: d.risk_level === 'HIGH' || d.risk_level === 'MEDIUM'
+            ? 'An unusual pattern was detected on this transaction.'
+            : '',
+        });
         setPendingPinInput(pinInput);
         setShowPinModal(false);
         setPinInput('');
@@ -326,7 +356,6 @@ export default function UserDashboard() {
         setTransferFaceBase64(null);
         setTransferFaceCaptured(false);
         setFaceModalMsg({ show: false, message: '', type: 'error' });
-        setTransferExplanation(d.explanation || null);  // store XAI explanation
         setShowFaceModal(true);
       } else {
         setPinModalMsg({ show: true, message: d.error || 'Transfer failed' });
@@ -395,6 +424,15 @@ export default function UserDashboard() {
         showAlert(setTransferMsg, 'Transfer approved after face verification.', 'success');
         loadBalance();
       } else if (d.action === 'BLOCK') {
+        // Send blocked notification email if it was a face mismatch
+        if (d.face_failed && currentUser?.email) {
+          sendTransferBlockedEmail({
+            name  : currentUser?.name  || '',
+            email : currentUser?.email || '',
+            phone : currentUser?.phone || '',
+            amount: transferAmount,
+          });
+        }
         setFaceModalMsg({
           show: true,
           message: d.error || 'Transfer blocked by fraud detection.',
@@ -420,7 +458,6 @@ export default function UserDashboard() {
     setShowFaceModal(false);
     setTransferFaceBase64(null);
     setTransferFaceCaptured(false);
-    setTransferExplanation(null);
     setPendingPinInput('');
     if (transferFaceStream) {
       transferFaceStream.getTracks().forEach(t => t.stop());
@@ -508,21 +545,41 @@ export default function UserDashboard() {
   };
 
   // ── Shared camera start utility ───────────────────────────────────────
+  // Sets stream state first, then attaches srcObject via useEffect below
+  // to guarantee the <video> element is in the DOM before assignment.
   const startCamera = async (videoRef, setStream, setErrMsg) => {
     try {
       const s = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
       });
       setStream(s);
-      if (videoRef.current) {
-        videoRef.current.srcObject = s;
-        // Mirror video for natural selfie UX — canvas capture does NOT mirror
-        videoRef.current.style.transform = 'scaleX(-1)';
-      }
+      // Attach after React re-renders — the useEffect below handles this
     } catch {
       setErrMsg('Camera access denied. Please allow camera access and try again.');
     }
   };
+
+  // Attach streams to video elements whenever they become ready
+  useEffect(() => {
+    if (resetStream && resetFaceVideoRef.current) {
+      resetFaceVideoRef.current.srcObject = resetStream;
+      resetFaceVideoRef.current.style.transform = 'scaleX(-1)';
+    }
+  }, [resetStream]);
+
+  useEffect(() => {
+    if (updateStream && updateFaceVideoRef.current) {
+      updateFaceVideoRef.current.srcObject = updateStream;
+      updateFaceVideoRef.current.style.transform = 'scaleX(-1)';
+    }
+  }, [updateStream]);
+
+  useEffect(() => {
+    if (transferFaceStream && transferFaceVideoRef.current) {
+      transferFaceVideoRef.current.srcObject = transferFaceStream;
+      transferFaceVideoRef.current.style.transform = 'scaleX(-1)';
+    }
+  }, [transferFaceStream]);
 
   const stopCameraStream = (stream, setStream, videoRef) => {
     if (stream) { stream.getTracks().forEach(t => t.stop()); setStream(null); }
@@ -1332,18 +1389,18 @@ export default function UserDashboard() {
         </div>
       )}
 
-      {/* ── Face Verification Modal (triggered when ML flags a transfer) ── */}
+      {/* ── Face Verification Modal (required for every transfer) ── */}
       {showFaceModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="bg-white rounded-2xl w-full max-w-[360px] shadow-2xl overflow-hidden">
 
-            {/* Header — security alert */}
-            <div className="bg-amber-50 border-b border-amber-200 px-6 py-4 flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+            {/* Header */}
+            <div className="border-b px-6 py-4 flex items-start gap-3 bg-emerald-50 border-emerald-200">
+              <Shield className="w-5 h-5 flex-shrink-0 mt-0.5 text-emerald-600" />
               <div>
-                <p className="text-sm font-bold text-amber-800">Identity Verification Required</p>
-                <p className="text-xs text-amber-700 mt-0.5">
-                  This transfer was flagged as high-risk. Scan your face to confirm it's you.
+                <p className="text-sm font-bold text-emerald-800">Face Verification Required</p>
+                <p className="text-xs mt-0.5 text-emerald-700">
+                  Please scan your face to verify your identity and complete this transfer.
                 </p>
               </div>
             </div>
@@ -1360,48 +1417,6 @@ export default function UserDashboard() {
                   <span className="font-bold text-slate-900">{Number(transferAmount).toLocaleString()} RWF</span>
                 </div>
               </div>
-
-              {/* XAI Explanation Panel */}
-              {transferExplanation && transferExplanation.available && (
-                <div className="mb-4 border border-amber-200 rounded-xl overflow-hidden">
-                  <div className="bg-amber-50 px-4 py-2.5 flex items-center gap-2 border-b border-amber-200">
-                    <Activity className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
-                    <span className="text-xs font-bold text-amber-800">Why was this flagged?</span>
-                    <span className="ml-auto text-[10px] text-amber-600 font-medium">{transferExplanation.method}</span>
-                  </div>
-                  <div className="bg-white px-4 py-3 space-y-2">
-                    {(transferExplanation.top_factors || []).slice(0, 3).map((f, i) => {
-                      const isRisk = f.direction === 'increases_risk';
-                      const allFactors = transferExplanation.all_factors || transferExplanation.top_factors || [];
-                      const maxImpact = Math.max(...allFactors.map(x => Math.abs(x.shap_value || 0.001)), 0.001);
-                      const pct = Math.min(Math.abs(f.shap_value || 0) / maxImpact * 100, 100);
-                      return (
-                        <div key={i}>
-                          <div className="flex items-center justify-between mb-0.5">
-                            <span className="text-xs font-medium text-slate-700">{f.label}</span>
-                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                              isRisk ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'
-                            }`}>
-                              {isRisk ? '↑ Risk' : '↓ Risk'}
-                            </span>
-                          </div>
-                          <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all ${isRisk ? 'bg-rose-400' : 'bg-emerald-400'}`}
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                          {f.detail && <p className="text-[10px] text-slate-500 mt-0.5">{f.detail}</p>}
-                        </div>
-                      );
-                    })}
-                    <p className="text-[10px] text-slate-500 pt-1 border-t border-slate-100">
-                      ML Score: <span className="font-bold text-slate-700">{((transferExplanation.fraud_score || 0) * 100).toFixed(1)}%</span>
-                      {' '}· Threshold: <span className="font-bold text-slate-700">{((transferExplanation.threshold || 0.38) * 100).toFixed(0)}%</span>
-                    </p>
-                  </div>
-                </div>
-              )}
 
               {/* Alert message */}
               {faceModalMsg.show && (

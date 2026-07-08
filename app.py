@@ -59,6 +59,13 @@ import numpy as np
 from datetime import datetime
 import time
 
+# Load .env file if present (development convenience)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed — use real environment variables
+
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 
@@ -373,14 +380,49 @@ def _reactivate_non_travel_users():
     One-time migration: reactivate users who are marked inactive but have
     no active travel record. This fixes accounts that were accidentally
     deactivated by the admin UI bug (status field was always undefined).
-    Safe to run on every startup -- only touches users with no current travel.
+    Also migrates legacy abroad users from is_active=FALSE to travel_status='abroad'.
+    Safe to run on every startup.
     """
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         c = conn.cursor()
+
+        # Add travel_status column if it does not exist yet
+        c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS travel_status TEXT DEFAULT 'active'")
+
+        # Create pending_abroad_transfers table for email link verification flow
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS pending_abroad_transfers (
+                id               SERIAL PRIMARY KEY,
+                token            TEXT UNIQUE NOT NULL,
+                session_token    TEXT NOT NULL,
+                phone_number     TEXT NOT NULL,
+                recipient_phone  TEXT NOT NULL,
+                amount           REAL NOT NULL,
+                network          TEXT NOT NULL,
+                destination      TEXT DEFAULT '',
+                created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at       TIMESTAMP NOT NULL,
+                completed        BOOLEAN DEFAULT FALSE
+            )
+        """)
+
+        # Migrate legacy: users with is_active=FALSE who have an active travel record
+        # → restore is_active=TRUE, set travel_status='abroad'
+        c.execute("""
+            UPDATE users SET is_active = TRUE, travel_status = 'abroad'
+            WHERE is_active = FALSE
+              AND phone_number IN (
+                  SELECT user_phone FROM travel_records
+                  WHERE sim_deactivated = TRUE
+                    AND date(return_date) >= CURRENT_DATE
+              )
+        """)
+
+        # Reactivate users with no active travel record who were accidentally deactivated
         c.execute("""
             UPDATE users
-            SET is_active = TRUE
+            SET is_active = TRUE, travel_status = 'active'
             WHERE is_active = FALSE
               AND email NOT LIKE '%@admin.com'
               AND phone_number NOT IN (
@@ -1400,6 +1442,165 @@ def admin_reactivate_sim():
         return _err(f"Reactivation failed: {e}", 500)
 
 
+# ── Abroad face verification via email link ───────────────────────────────
+
+@app.route("/api/abroad/verify-token", methods=["GET"])
+def abroad_verify_token_info():
+    """
+    GET — called when user opens the email link.
+    Returns transfer details so the frontend can display them before face scan.
+    """
+    token = request.args.get("token", "").strip()
+    if not token:
+        return _err("Token is required.", 400)
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        c = conn.cursor()
+        c.execute("""
+            SELECT phone_number, recipient_phone, amount, network,
+                   destination, expires_at, completed
+            FROM pending_abroad_transfers
+            WHERE token = %s
+        """, (token,))
+        row = c.fetchone()
+        conn.close()
+        if not row:
+            return _err("Invalid or expired verification link.", 404)
+        phone, recipient, amount, network, destination, expires_at, completed = row
+        if completed:
+            return _err("This transfer has already been completed.", 410)
+        if expires_at < datetime.now():
+            return _err("This verification link has expired. Please initiate a new transfer.", 410)
+        # Get sender name
+        conn2 = psycopg2.connect(**DB_CONFIG)
+        c2 = conn2.cursor()
+        c2.execute("SELECT full_name FROM users WHERE phone_number = %s", (phone,))
+        name_row = c2.fetchone()
+        conn2.close()
+        return _ok({
+            "success"        : True,
+            "token"          : token,
+            "phone_number"   : phone,
+            "recipient_phone": recipient,
+            "amount"         : amount,
+            "network"        : network,
+            "destination"    : destination,
+            "expires_at"     : expires_at.isoformat() if expires_at else None,
+            "sender_name"    : name_row[0] if name_row else "Unknown",
+        })
+    except Exception as e:
+        return _err(f"Verification lookup failed: {e}", 500)
+
+
+@app.route("/api/abroad/complete-transfer", methods=["POST"])
+def abroad_complete_transfer():
+    """
+    POST — called after user scans their face on the verification page.
+    Verifies face against stored encoding, then completes the transfer.
+
+    Race-condition safety: we atomically claim the token (flip completed=TRUE)
+    BEFORE running any transfer logic, then roll it back if the transfer fails.
+    This prevents double-spend from rapid duplicate submissions.
+    """
+    try:
+        data       = request.get_json() or {}
+        token      = data.get("token", "").strip()
+        face_b64   = data.get("face_base64", "")
+
+        if not token or not face_b64:
+            return _err("token and face_base64 are required.", 400)
+
+        # ── Atomically claim the token ─────────────────────────────────────
+        # UPDATE ... WHERE completed=FALSE returns the row only if it was
+        # unclaimed; a concurrent request will find completed=TRUE and get
+        # no row back → safe duplicate-submission prevention.
+        conn = psycopg2.connect(**DB_CONFIG)
+        c = conn.cursor()
+        c.execute("""
+            UPDATE pending_abroad_transfers
+               SET completed = TRUE
+             WHERE token     = %s
+               AND completed = FALSE
+               AND expires_at > NOW()
+         RETURNING session_token, phone_number, recipient_phone,
+                   amount, network, destination, expires_at
+        """, (token,))
+        row = c.fetchone()
+        conn.commit()
+
+        if not row:
+            # Check why — expired vs already used vs not found
+            c.execute("""
+                SELECT completed, expires_at
+                FROM pending_abroad_transfers WHERE token = %s
+            """, (token,))
+            info = c.fetchone()
+            conn.close()
+            if not info:
+                return _err("Invalid or expired verification link.", 404)
+            completed_flag, expires_at = info
+            if completed_flag:
+                return _err("This transfer has already been completed.", 410)
+            return _err("This verification link has expired. Please initiate a new transfer.", 410)
+
+        conn.close()
+        session_token, phone, recipient, amount, network, destination, expires_at = row
+
+        # ── Verify face ────────────────────────────────────────────────────
+        face_result = user_reg.verify_face_from_base64(phone, face_b64)
+        if not face_result.get("verified"):
+            # Face failed — roll back the claim so the user can retry
+            try:
+                conn_rb = psycopg2.connect(**DB_CONFIG)
+                c_rb = conn_rb.cursor()
+                c_rb.execute(
+                    "UPDATE pending_abroad_transfers SET completed = FALSE WHERE token = %s",
+                    (token,)
+                )
+                conn_rb.commit()
+                conn_rb.close()
+            except Exception:
+                pass
+            error_msg = face_result.get("error", "Transaction failed because you are not the owner of this account.")
+            return _err(error_msg, 403)
+
+        # ── Face matched — execute the transfer ────────────────────────────
+        result = transfer_system.initiate_transfer(
+            session_token   = session_token,
+            recipient_phone = recipient,
+            amount          = float(amount),
+            face_base64     = face_b64,
+        )
+
+        if result.get("success"):
+            # Token is already marked completed — nothing more to do
+            return _ok({
+                "success"  : True,
+                "message"  : f"Transfer of {amount:,.0f} RWF completed successfully after face verification.",
+                "reference": result.get("reference"),
+                "amount"   : amount,
+                "recipient": recipient,
+            })
+        else:
+            # Transfer failed (e.g. session expired, insufficient balance after ML) —
+            # roll back the claim so the user can retry if appropriate
+            try:
+                conn_rb = psycopg2.connect(**DB_CONFIG)
+                c_rb = conn_rb.cursor()
+                c_rb.execute(
+                    "UPDATE pending_abroad_transfers SET completed = FALSE WHERE token = %s",
+                    (token,)
+                )
+                conn_rb.commit()
+                conn_rb.close()
+            except Exception:
+                pass
+            return _err(result.get("error", "Transfer failed."), 400)
+
+    except Exception as e:
+        return _err(f"Transfer completion failed: {e}", 500)
+
+
 # 
 # ADMIN / DASHBOARD ROUTES
 # 
@@ -1617,12 +1818,13 @@ def admin_all_users():
         conn = psycopg2.connect(**DB_CONFIG)
         c    = conn.cursor()
         c.execute(
-            "SELECT full_name, phone_number, email, account_balance, is_active, national_id, gender "
+            "SELECT full_name, phone_number, email, account_balance, is_active, national_id, gender, "
+            "COALESCE(travel_status, 'active') AS travel_status "
             "FROM users WHERE email NOT LIKE '%@admin.com' ORDER BY registration_date DESC"
         )
         users = [{"full_name": r[0], "phone_number": r[1], "email": r[2],
                   "account_balance": r[3], "is_active": bool(r[4]),
-                  "national_id": r[5], "sex": r[6]}
+                  "national_id": r[5], "sex": r[6], "travel_status": r[7]}
                  for r in c.fetchall()]
         conn.close()
         return _ok({"success": True, "users": users})
@@ -2350,14 +2552,15 @@ def user_profile():
         conn = psycopg2.connect(**DB_CONFIG)
         c = conn.cursor()
         c.execute(
-            "SELECT full_name, email, phone_number, national_id, account_balance, gender, is_active FROM users WHERE phone_number=%s",
+            "SELECT full_name, email, phone_number, national_id, account_balance, gender, is_active, "
+            "COALESCE(travel_status, 'active') AS travel_status FROM users WHERE phone_number=%s",
             (user["phone"],)
         )
         row = c.fetchone()
         if not row:
             conn.close()
             return _err("User not found.")
-        # Check if user is abroad (sim deactivated)
+        # Check if user is abroad via travel_status or travel_records
         today = datetime.now().date().isoformat()
         c.execute(
             "SELECT destination_country, return_date FROM travel_records "
@@ -2367,11 +2570,19 @@ def user_profile():
         )
         travel = c.fetchone()
         conn.close()
-        status = "abroad" if travel else ("active" if row[6] else "inactive")
+        # travel_status column is the source of truth; travel_records as fallback
+        ts = row[7] if len(row) > 7 else 'active'
+        if travel or ts == 'abroad':
+            status = "abroad"
+        elif not row[6]:
+            status = "inactive"
+        else:
+            status = "active"
         return _ok({"success": True, "user": {
             "name": row[0], "email": row[1], "phone": row[2],
             "national_id": row[3], "balance": row[4], "sex": row[5],
             "is_active": bool(row[6]),
+            "travel_status": ts,
             "status": status,
             "travel_destination": travel[0] if travel else None,
             "travel_return": str(travel[1]) if travel else None,
@@ -2502,3 +2713,141 @@ if __name__ == "__main__":
     print(f"  ML Model : {fraud_detector.config.get('best_model', 'not loaded')}")
     print("=" * 60)
     app.run(debug=True, host="0.0.0.0", port=5000, threaded=True, use_reloader=False)
+
+
+# ── Abroad transfer verification endpoints ────────────────────────────────
+
+@app.route("/api/abroad/verify-info", methods=["POST"])
+def abroad_verify_info():
+    """
+    Step 1 — Called when user opens the verification link.
+    Validates the token and returns transfer details so the page
+    can show what transfer they are verifying before scanning face.
+    """
+    try:
+        data  = request.get_json() or {}
+        token = data.get("token", "").strip()
+        if not token:
+            return _err("Verification token is required.", 400)
+
+        conn = psycopg2.connect(**DB_CONFIG)
+        c    = conn.cursor()
+        c.execute("""
+            SELECT id, phone_number, recipient_phone, amount, network,
+                   destination, expires_at, completed
+            FROM pending_abroad_transfers
+            WHERE token = %s
+        """, (token,))
+        row = c.fetchone()
+        conn.close()
+
+        if not row:
+            return _err("Invalid or expired verification link.", 404)
+
+        pid, phone, recip, amount, network, dest, expires_at, completed = row
+
+        if completed:
+            return _err("This transfer has already been completed.", 400)
+
+        if expires_at < datetime.now():
+            return _err("This verification link has expired. Please initiate the transfer again.", 410)
+
+        # Get user name
+        conn2 = psycopg2.connect(**DB_CONFIG)
+        c2 = conn2.cursor()
+        c2.execute("SELECT full_name FROM users WHERE phone_number = %s", (phone,))
+        urow = c2.fetchone()
+        conn2.close()
+
+        return _ok({
+            "success"         : True,
+            "pending_id"      : pid,
+            "phone_number"    : phone,
+            "recipient_phone" : recip,
+            "amount"          : amount,
+            "network"         : network,
+            "destination"     : dest,
+            "user_name"       : urow[0] if urow else "Customer",
+            "expires_at"      : expires_at.isoformat(),
+        })
+    except Exception as e:
+        return _err(f"Verification info failed: {e}", 500)
+
+
+@app.route("/api/abroad/verify-face", methods=["POST"])
+def abroad_verify_face():
+    """
+    Step 2 — Called when user submits their face scan on the verification page.
+    Verifies the face, then completes the pending transfer if matched.
+    """
+    try:
+        data       = request.get_json() or {}
+        token      = data.get("token", "").strip()
+        face_b64   = data.get("face_base64", "")
+
+        if not token or not face_b64:
+            return _err("Token and face image are required.", 400)
+
+        conn = psycopg2.connect(**DB_CONFIG)
+        c    = conn.cursor()
+        c.execute("""
+            SELECT id, session_token, phone_number, recipient_phone,
+                   amount, network, destination, expires_at, completed
+            FROM pending_abroad_transfers
+            WHERE token = %s
+        """, (token,))
+        row = c.fetchone()
+        conn.close()
+
+        if not row:
+            return _err("Invalid or expired verification link.", 404)
+
+        pid, sess_token, phone, recip, amount, network, dest, expires_at, completed = row
+
+        if completed:
+            return _err("This transfer has already been completed.", 400)
+
+        if expires_at < datetime.now():
+            return _err("This verification link has expired. Please initiate the transfer again.", 410)
+
+        # Verify face
+        face_result = user_reg.verify_face_from_base64(phone, face_b64)
+        if not face_result.get("verified"):
+            return _err(
+                face_result.get("error") or
+                "Transaction failed because you are not the owner of this account.",
+                403
+            )
+
+        # Face matched — complete the transfer
+        result = transfer_system.initiate_transfer(
+            session_token   = sess_token,
+            recipient_phone = recip,
+            amount          = float(amount),
+            face_base64     = face_b64,   # pass face so fraud engine skips re-challenge
+        )
+
+        if result.get("success"):
+            # Mark pending transfer as completed
+            conn2 = psycopg2.connect(**DB_CONFIG)
+            c2 = conn2.cursor()
+            c2.execute(
+                "UPDATE pending_abroad_transfers SET completed = TRUE WHERE id = %s",
+                (pid,)
+            )
+            conn2.commit()
+            conn2.close()
+
+            return _ok({
+                "success"   : True,
+                "message"   : f"Transfer of {amount:,.0f} RWF completed successfully. Face verification passed.",
+                "reference" : result.get("reference"),
+                "amount"    : amount,
+                "recipient" : recip,
+                "network"   : network,
+            })
+        else:
+            return _err(result.get("error") or "Transfer failed after face verification.", 400)
+
+    except Exception as e:
+        return _err(f"Face verification failed: {e}", 500)

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Shield, Camera, Check, RefreshCw, UserPlus, AlertTriangle, X } from 'lucide-react';
-import { sendLoginNotification } from '../utils/emailService';
+import { sendLoginNotification, sendRegistrationEmail } from '../utils/emailService';
 
 const API = '';
 
@@ -85,18 +85,22 @@ export default function Login() {
         video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
       });
       setStream(mediaStream);
-      if (faceVideoRef.current) {
-        faceVideoRef.current.srcObject = mediaStream;
-        // Mirror video for natural selfie UX — canvas does NOT mirror
-        faceVideoRef.current.style.transform = 'scaleX(-1)';
-      }
       setFaceCaptured(false);
       setFaceBase64(null);
       setQualityWarn({ show: false, message: '' });
+      // srcObject attached by useEffect below after React re-renders the video element
     } catch (e) {
       setRegAlert({ show: true, message: 'Camera access denied. Please allow camera access and try again — face registration is required.', type: 'danger' });
     }
   };
+
+  // Attach stream to video element whenever stream becomes available
+  useEffect(() => {
+    if (stream && faceVideoRef.current) {
+      faceVideoRef.current.srcObject = stream;
+      faceVideoRef.current.style.transform = 'scaleX(-1)';
+    }
+  }, [stream]);
   
   const stopCamera = () => {
     if (stream) {
@@ -289,6 +293,12 @@ export default function Login() {
       });
       const d = await r.json();
       if (d.success) {
+        // Send welcome email via EmailJS
+        sendRegistrationEmail({
+          name : fullName,
+          email: regEmail,
+          phone: '+250' + regPhone,
+        });
         localStorage.setItem('flash_message', 'Registration successful! Please login.');
         localStorage.setItem('flash_type', 'success');
         setView('login');

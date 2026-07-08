@@ -386,9 +386,9 @@ export default function ProviderDashboard() {
       });
       const d = await r.json();
       if (d.success) {
-        showAlert(setReactMsg, 'SIM reactivated successfully', 'success');
+        showAlert(setReactMsg, 'Customer return confirmed successfully', 'success');
       } else {
-        showAlert(setReactMsg, d.error || 'Failed to reactivate SIM', 'error');
+        showAlert(setReactMsg, d.error || 'Failed to confirm return', 'error');
       }
     } catch (e) {
       showAlert(setReactMsg, 'Network error. Please try again.', 'error');
@@ -782,8 +782,14 @@ export default function ProviderDashboard() {
             </div>
             <div className="flex justify-between py-3 text-xs">
               <span className="font-medium text-slate-600">Status</span>
-              <span className={`font-bold px-2 py-0.5 rounded-full text-[10px] uppercase ${lookupResult.is_active ? 'bg-emerald-100 text-emerald-700 border border-emerald-300' : 'bg-rose-100 text-rose-700 border border-rose-300'}`}>
-                {lookupResult.is_active ? 'Active' : 'Inactive'}
+              <span className={`font-bold px-2 py-0.5 rounded-full text-[10px] uppercase ${
+                lookupResult.travel_status === 'abroad'
+                  ? 'bg-amber-100 text-amber-700 border border-amber-300'
+                  : lookupResult.is_active
+                    ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
+                    : 'bg-rose-100 text-rose-700 border border-rose-300'
+              }`}>
+                {lookupResult.travel_status === 'abroad' ? 'Abroad' : lookupResult.is_active ? 'Active' : 'Inactive'}
               </span>
             </div>
           </div>
@@ -908,8 +914,12 @@ export default function ProviderDashboard() {
                       <div className="flex flex-col items-end gap-1 text-right">
                         <div className="font-mono font-bold text-emerald-700">{fmtRWF(user.account_balance || 0)}</div>
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
-                          user.is_active ? 'bg-emerald-100 text-emerald-700 border-emerald-300' : 'bg-rose-100 text-rose-700 border-rose-300'
-                        }`}>{user.is_active ? 'Active' : 'Inactive'}</span>
+                          user.travel_status === 'abroad'
+                            ? 'bg-amber-100 text-amber-700 border-amber-300'
+                            : user.is_active
+                              ? 'bg-emerald-100 text-emerald-700 border-emerald-300'
+                              : 'bg-rose-100 text-rose-700 border-rose-300'
+                        }`}>{user.travel_status === 'abroad' ? 'Abroad' : user.is_active ? 'Active' : 'Inactive'}</span>
                       </div>
                     </div>
                   ))
@@ -926,7 +936,7 @@ export default function ProviderDashboard() {
               <h1 className="text-2xl font-bold text-slate-900">
                 Travel Control
               </h1>
-              <p className="mt-1 text-sm text-slate-600">Manage customer travel registrations and SIM blocking</p>
+              <p className="mt-1 text-sm text-slate-600">Manage customer travel registrations</p>
             </div>
             
             <div className="grid grid-cols-2 gap-6">
@@ -936,7 +946,7 @@ export default function ProviderDashboard() {
                     <Send className="w-5 h-5 text-white" />
                   </div>
                   <h2 className="text-base font-bold text-slate-800">Register Travel</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Block SIM when customer travels abroad</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Register customer as abroad for travel verification</p>
                 </div>
                 <div className="p-6">
                   <AlertMsg msg={travelMsg} />
@@ -988,7 +998,7 @@ export default function ProviderDashboard() {
                   </div>
                   <Button onClick={registerTravel} className="justify-center w-full">
                     <Send className="w-4 h-4" />
-                    Block SIM & Register Travel
+                    Register Customer Abroad
                   </Button>
                 </div>
               </Card>
@@ -998,8 +1008,8 @@ export default function ProviderDashboard() {
                   <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-sky-500 flex items-center justify-center mb-2.5">
                     <RefreshCw className="w-5 h-5 text-white" />
                   </div>
-                  <h2 className="text-base font-bold text-slate-800">Reactivate on Return</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Re-enable transfers after customer returns</p>
+                  <h2 className="text-base font-bold text-slate-800">Confirm Return</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">Confirm customer has returned from abroad</p>
                 </div>
                 <div className="p-6">
                   <AlertMsg msg={reactMsg} />
@@ -1019,7 +1029,7 @@ export default function ProviderDashboard() {
                   </div>
                   <Button onClick={reactivateSim} className="justify-center w-full mb-5">
                     <Home className="w-4 h-4" />
-                    Confirm Return & Re-enable SIM
+                    Confirm Return
                   </Button>
                   <hr className="my-5 border-slate-300" />
                   <div className="mb-5">
@@ -1042,7 +1052,7 @@ export default function ProviderDashboard() {
                       {travelStatus.destination_country && <div><span className="font-semibold">Destination:</span> {travelStatus.destination_country}</div>}
                       {travelStatus.departure_date && <div><span className="font-semibold">Departed:</span> {fmtDate(travelStatus.departure_date)}</div>}
                       {travelStatus.return_date && <div><span className="font-semibold">Returns:</span> {fmtDate(travelStatus.return_date)}</div>}
-                      <div><span className="font-semibold">SIM Blocked:</span> {travelStatus.sim_deactivated ? 'Yes' : 'No'}</div>
+                      <div><span className="font-semibold">Registered Abroad:</span> {travelStatus.sim_deactivated ? 'Yes' : 'No'}</div>
                     </div>
                   )}
                 </div>

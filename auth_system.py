@@ -14,34 +14,73 @@ import psycopg2.extras
 import hashlib
 import secrets
 import re
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 
 # ── Email config ──────────────────────────────────────────────────────────
 import os as _os
-SMTP_HOST     = "smtp.gmail.com"
-SMTP_PORT     = 587
-SMTP_USERNAME = _os.environ.get("SMTP_USERNAME", "ruhamorose@gmail.com")
-SMTP_PASSWORD = _os.environ.get("SMTP_PASSWORD", "")
 
-def _send_email(to_email: str, subject: str, html_body: str):
-    """Send an HTML email. Fails silently so it never blocks the main flow."""
+# Load .env file if present
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv()
+except ImportError:
+    pass
+
+# ── EmailJS REST API ──────────────────────────────────────────────────────
+# Emails are sent via EmailJS — no SMTP server or password required.
+# Public key  : used by the frontend browser SDK (emailService.js)
+# Private key : used by this backend — requires "Allow non-browser API"
+#               toggled ON in EmailJS Account → API Settings.
+EMAILJS_SERVICE_ID  = "service_ex6ifxp"
+EMAILJS_TEMPLATE_ID = "template_j26i0sh"
+EMAILJS_PUBLIC_KEY  = "dFr0-PoHeQ9iDy9sF"
+# Paste your Private Key below (EmailJS Account → API Settings → Use Private Key)
+EMAILJS_PRIVATE_KEY = _os.environ.get("EMAILJS_PRIVATE_KEY", "")
+
+def _send_email(to_email: str, subject: str, html_body: str,
+                name: str = "MoMo Shield User", phone: str = "",
+                message_text: str = "", verification_link: str = ""):
+    """
+    Send an email via EmailJS REST API.
+    No SMTP server or password needed — uses the same EmailJS credentials
+    as the frontend emailService.js.
+    Fails silently — never blocks the main application flow.
+    Template variables sent: to_email, to_name, user_email, user_phone,
+                             login_time, subject, message, verification_link
+    """
+    import urllib.request
+    import json as _json
     try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"]    = f"MoMo Shield <{SMTP_USERNAME}>"
-        msg["To"]      = to_email
-        msg.attach(MIMEText(html_body, "html"))
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(SMTP_USERNAME, SMTP_PASSWORD)
-            server.sendmail(SMTP_USERNAME, to_email, msg.as_string())
-        print(f"[Email] Sent '{subject}' to {to_email}")
+        now = datetime.now().strftime("%d %B %Y, %H:%M") + " (Rwanda Time)"
+        payload = _json.dumps({
+            "service_id" : EMAILJS_SERVICE_ID,
+            "template_id": EMAILJS_TEMPLATE_ID,
+            "accessToken": EMAILJS_PRIVATE_KEY or EMAILJS_PUBLIC_KEY,
+            "template_params": {
+                "to_email"          : to_email,
+                "to_name"           : name,
+                "user_email"        : to_email,
+                "user_phone"        : phone or "—",
+                "login_time"        : now,
+                "subject"           : subject,
+                "message"           : message_text or subject,
+                "verification_link" : verification_link,
+            }
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "https://api.emailjs.com/api/v1.0/email/send",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Origin"      : "http://localhost:5173"
+            },
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = resp.read().decode("utf-8")
+            print(f"[Email] ✅ Sent '{subject}' to {to_email} — response: {body}")
     except Exception as e:
-        print(f"[Email] Failed to send to {to_email}: {e}")
+        print(f"[Email] ❌ Failed to send '{subject}' to {to_email}: {e}")
 
 
 class AuthenticationSystem:
@@ -400,7 +439,7 @@ class AuthenticationSystem:
         conn.commit()
         conn.close()
 
-        # Login notification is sent from the frontend via EmailJS (no SMTP needed)
+        # Login notification is sent from the frontend via EmailJS
 
         return {
             "success"      : True,
@@ -508,7 +547,7 @@ class AuthenticationSystem:
         conn.close()
 
         # Use FRONTEND_URL env var for deployed environments; fall back to localhost for dev
-        frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:5173")
+        frontend_url = _os.environ.get("FRONTEND_URL", "http://localhost:5173")
         reset_link = f"{frontend_url}/reset-password?token={token}"
         html = f"""
         <div style="font-family:'Times New Roman',Times,serif;max-width:520px;margin:auto;
@@ -539,7 +578,19 @@ class AuthenticationSystem:
         </div>
         """
         try:
-            _send_email(email, "MoMo Shield - Password Reset Request", html)
+            _send_email(
+                to_email     = email,
+                subject      = "MoMo Shield — Password Reset Request",
+                html_body    = html,
+                name         = "MoMo Shield User",
+                phone        = "",
+                message_text = (
+                    f"We received a request to reset your MoMo Shield password. "
+                    f"Click the link below to set a new password (expires in 1 hour):\n\n"
+                    f"{reset_link}\n\n"
+                    f"If you did not request this, ignore this email — your account is safe."
+                )
+            )
         except Exception as e:
             return {
                 "success": True,
@@ -720,16 +771,7 @@ class AuthenticationSystem:
             if not match[0]:
                 return {
                     "success": False,
-                    "error": (
-                        " Face verification failed. "
-                        "The face you scanned does not match the face registered on this account. "
-                        "This means either:\n"
-                        "• You are not the account owner\n"
-                        "• Poor lighting or angle -- try again in a brighter area\n"
-                        "• Glasses, hat, or mask is covering your face\n\n"
-                        "For security, this PIN reset attempt has been blocked and logged. "
-                        "If this is your account, please contact support."
-                    )
+                    "error": "Transaction failed because you are not the owner of this account."
                 }
         except ImportError:
             return {

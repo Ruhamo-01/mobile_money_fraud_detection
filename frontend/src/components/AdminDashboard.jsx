@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Shield, LayoutDashboard, Users, UserCheck, AlertTriangle, Lock,
   Database, Activity, Settings, LogOut, Plus, Download, Save,
-  CheckCircle, XCircle, RefreshCw, Trash2, Edit2, X
+  CheckCircle, XCircle, RefreshCw, Trash2, Edit2, X, Globe
 } from 'lucide-react';
 import { fmtDate } from '../utils/helpers';
 const API = '';
@@ -30,15 +30,21 @@ const Btn = ({ children, variant = 'primary', size = 'md', className = '', ...pr
   );
 };
 
-const Badge = ({ active }) => (
-  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${
-    active ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
-           : 'bg-rose-100 text-rose-700 border border-rose-300'
-  }`}>
-    {active ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
-    {active ? 'Active' : 'Inactive'}
-  </span>
-);
+const Badge = ({ active, travelStatus }) => {
+  const isAbroad = travelStatus === 'abroad';
+  const cls = isAbroad
+    ? 'bg-amber-100 text-amber-700 border border-amber-300'
+    : active
+      ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
+      : 'bg-rose-100 text-rose-700 border border-rose-300';
+  const icon = isAbroad ? <Globe className="w-3 h-3" /> : active ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />;
+  const label = isAbroad ? 'Abroad' : active ? 'Active' : 'Inactive';
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${cls}`}>
+      {icon}{label}
+    </span>
+  );
+};
 
 const RiskBadge = ({ level }) => {
   const l = (level || '').toLowerCase();
@@ -276,6 +282,7 @@ export default function AdminDashboard() {
         email: u.email, national_id: u.national_id,
         sex: u.sex || u.gender, balance: u.account_balance ?? u.balance ?? 0,
         is_active: u.is_active,
+        travel_status: u.travel_status || 'active',
       })));
     } catch {}
   };
@@ -657,7 +664,7 @@ export default function AdminDashboard() {
                         <td className="px-4 py-3 font-mono text-sm text-slate-600">{u.national_id}</td>
                         <td className="px-4 py-3 text-sm text-slate-700">{u.sex}</td>
                         <td className="px-4 py-3 font-mono text-sm font-bold text-emerald-700">{Number(u.balance).toLocaleString()} RWF</td>
-                        <td className="px-4 py-3"><Badge active={u.is_active} /></td>
+                        <td className="px-4 py-3"><Badge active={u.is_active} travelStatus={u.travel_status} /></td>
                         <td className="px-4 py-3">
                           <div className="flex gap-2">
                             <Btn size="sm" variant="ghost" onClick={() => openEditUser(u)}><Edit2 className="w-3.5 h-3.5" /></Btn>
@@ -841,7 +848,7 @@ export default function AdminDashboard() {
                     ['service_providers', 'Manager accounts'],
                     ['money_transfers',   'Transfer records with fraud scores'],
                     ['fraud_alerts',      'All fraud detection events'],
-                    ['travel_records',    'SIM travel blocks'],
+                    ['travel_records',    'Customer abroad registrations'],
                     ['access_logs',       'Login/logout audit trail'],
                     ['user_sessions',     'Active sessions'],
                     ['system_settings',   'Admin configuration'],

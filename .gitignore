@@ -1,7 +1,29 @@
-
+# Python
 __pycache__/
 *.pyc
+*.pyo
+.venv/
+
+# ML model artifacts (large binary files — regenerate with Momo_Clean.ipynb)
 *.pkl
 *.db
+
+# Uploaded face images (user data — never commit)
 uploads/
-node_modules/
+
+# Frontend build output and dependencies
+frontend/node_modules/
+frontend/dist/
+
+# Environment variables (contains passwords — never commit)
+.env
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Presentation / office files
+*.pptx
+*.ppt
+
+# Training dataset (too large for git — download separately)
+Fraud.csv

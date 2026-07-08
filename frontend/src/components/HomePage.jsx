@@ -34,7 +34,7 @@ export default function HomePage() {
     { icon: Brain,       label: 'ML Fraud Detection',      sub: 'XGBoost · 97.3% AUC' },
     { icon: Fingerprint, label: 'Face Verification',        sub: 'Biometric identity gate' },
     { icon: Lock,        label: 'PIN Security',             sub: '3-strike lockout' },
-    { icon: Globe,       label: 'Travel SIM Control',       sub: 'Block transfers abroad' },
+    { icon: Globe,       label: 'Travel Abroad Control',  sub: 'Verify identity when abroad' },
   ];
 
   const roles = [
